@@ -62,7 +62,8 @@
         </div>
         <div>
           <label for="desc">Description of proceedings</label>
-          <select id="desc"><option value="">— chọn mô tả —</option></select>
+          <input id="desc" type="text" list="descList" placeholder="chọn trong danh sách hoặc gõ tay…" autocomplete="off">
+          <datalist id="descList"></datalist>
         </div>
       </div>
       <div class="grid cols-4" style="margin-bottom:14px">
@@ -171,9 +172,7 @@ async function api(url, opts) {
 async function loadDescriptions() {
   try {
     const d = await api('/api/descriptions');
-    const sel = $('desc');
-    sel.innerHTML = '<option value="">— chọn mô tả —</option>'
-      + d.items.map(x => `<option value="${x}">${x}</option>`).join('');
+    $('descList').innerHTML = d.items.map(x => `<option value="${x}">`).join('');
   } catch (e) { /* bỏ qua */ }
 }
 
@@ -317,13 +316,6 @@ function enterEditMode(r) {
   $('panel').value = r.panel_number || '';
   $('project').value = r.project_number || '';
   $('desc').value = r.description || '';
-  // nếu dòng cũ có mô tả không nằm trong danh sách, thêm tạm vào để không mất
-  if (r.description && !Array.from($('desc').options).some(o => o.value === r.description)) {
-    const opt = document.createElement('option');
-    opt.value = r.description; opt.textContent = r.description;
-    $('desc').appendChild(opt);
-    $('desc').value = r.description;
-  }
   $('normal').value = r.normal_hours || 0;
   $('travel').value = r.travel_hours || 0;
   $('ota').value = r.ot_a || 0;

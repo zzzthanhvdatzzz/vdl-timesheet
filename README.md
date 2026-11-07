@@ -8,7 +8,7 @@ file timesheet `.xlsx` đúng form gốc của công ty, admin quản lý nhân 
 **Nhân viên**
 - Đăng nhập bằng tài khoản riêng (mỗi người một tài khoản).
 - Nhập **panel number** → hệ thống tự điền **project number** (kèm mô tả panel).
-- Chọn **Description of proceedings** từ danh sách cố định.
+- Chọn **Description of proceedings** từ danh sách gợi ý, hoặc gõ tay nếu chưa có trong danh sách.
 - Nhập giờ: Normal (tối đa 8h/ngày), Traveling, Overtime A (ngày thường), Overtime B (Thứ Bảy/Chủ nhật).
 - Sửa lại hoặc xoá dòng giờ đã lưu; dữ liệu ghi thẳng vào file timesheet trên máy chủ.
 - Thanh tiến trình tuần: mục tiêu 40h hành chính, có cờ đích, tự chuyển xanh khi đủ.
