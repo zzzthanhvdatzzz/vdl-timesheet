@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chấm công - VDL VN</title>
+  <link rel="stylesheet" href="/static/style.css?v=12">
+</head>
+<body>
+<header class="topbar">
+  <h1>CHẤM CÔNG VDL VN</h1>
+  <span class="spacer"></span>
+  <span class="who" id="who"></span>
+  <button class="ghost small" id="notifBtn" title="Thông báo">🔔 Thông báo <span id="notifBadge" style="display:none;background:#b02a2a;color:#fff;border-radius:10px;padding:0 6px;font-size:11px">0</span></button>
+  <a href="/account" class="ghost small" style="background:#eaeef4;color:#1d2433;text-decoration:none;padding:5px 10px;border-radius:7px;font-size:12px;font-weight:500">Đổi mật khẩu</a>
+  <button class="ghost small" id="logout">Đăng xuất</button>
+</header>
+
+<div class="wrap">
+  <div class="card">
+    <div class="grid cols-2">
+      <div>
+        <label>Nhân viên</label>
+        <div id="empName" style="font-weight:600;padding-top:4px">—</div>
+        <div class="hint" id="empNo"></div>
+      </div>
+      <div>
+        <label>Cost place (chỉ admin sửa)</label>
+        <div class="locked-badge"><span id="cpText">—</span><span class="lock">🔒 cố định</span></div>
+        <div class="hint">Mã cost centre theo hồ sơ nhân sự của bạn.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px">
+      <h2 style="margin:0" id="progTitle">Tiến độ tuần này</h2>
+      <span id="progText" style="font-size:15px;font-weight:700;color:#164a6d">0h / 40h</span>
+    </div>
+    <div class="bar"><div class="bar-fill" id="progFill"></div><span class="bar-flag" title="Đích 40h">🏁</span></div>
+    <div class="hint" id="progHint">Giờ hành chính bắt buộc 40h/tuần.</div>
+  </div>
+
+  <div class="card">
+    <h2>Ghi giờ làm việc</h2>
+    <form id="entryForm">
+      <div class="grid cols-4" style="margin-bottom:14px">
+        <div>
+          <label for="work_date">Ngày</label>
+          <input id="work_date" type="date" required>
+          <div class="hint" id="dayType"></div>
+          <div class="hint" id="weekOfDay" style="color:#164a6d;font-weight:600"></div>
+        </div>
+        <div>
+          <label for="panel">Panel number</label>
+          <input id="panel" type="text" list="panelList" placeholder="VD: 3277-YN512578-U10.0" autocomplete="off">
+          <datalist id="panelList"></datalist>
+        </div>
+        <div>
+          <label for="project">Project number (tự điền)</label>
+          <input id="project" type="text" readonly placeholder="— nhập panel number —">
+        </div>
+        <div>
+          <label for="desc">Description of proceedings</label>
+          <select id="desc"><option value="">— chọn mô tả —</option></select>
+        </div>
+      </div>
+      <div class="grid cols-4" style="margin-bottom:14px">
+        <div>
+          <label for="normal">Normal hours (tối đa 8)</label>
+          <input id="normal" type="number" min="0" max="8" step="0.5" value="8">
+        </div>
+        <div><label for="travel">Traveling hours</label><input id="travel" type="number" min="0" max="24" step="0.5" value="0"></div>
+        <div>
+          <label for="ota">Overtime A <span id="otaNote" class="hint" style="display:none">(ngày thường)</span></label>
+          <input id="ota" type="number" min="0" max="16" step="0.5" value="0">
+        </div>
+        <div>
+          <label for="otb">Overtime B <span id="otbNote" class="hint" style="display:none">(T7/CN)</span></label>
+          <input id="otb" type="number" min="0" max="16" step="0.5" value="0">
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <button type="submit" id="saveBtn">Lưu giờ</button>
+        <button type="button" class="ghost" id="resetBtn">Xoá form</button>
+        <button type="button" class="ghost" id="cancelEditBtn" style="display:none">Huỷ sửa</button>
+        <span class="hint" id="panelHint"></span>
+      </div>
+      <div class="msg" id="formMsg"></div>
+    </form>
+  </div>
+
+  <div class="card">
+    <div class="week-nav">
+      <button class="ghost small" id="prevWeek">← Tuần trước</button>
+      <span class="label" id="weekLabel"></span>
+      <button class="ghost small" id="nextWeek">Tuần sau →</button>
+      <button class="small" id="exportBtn">Xuất Excel tuần này</button>
+      <button class="ghost small" id="downloadBtn">Tải file timesheet của tôi</button>
+      <span class="spacer" style="flex:1"></span>
+      <span class="hint" id="totalHint"></span>
+    </div>
+    <div style="overflow-x:auto">
+    <table>
+      <thead>
+        <tr>
+          <th>Ngày</th><th>Project</th><th>Panel</th><th>Mô tả</th>
+          <th class="num">Normal</th><th class="num">Travel</th><th class="num">OT A</th><th class="num">OT B</th>
+          <th>Cost place</th><th></th>
+        </tr>
+      </thead>
+      <tbody id="rows"><tr><td colspan="10" class="hint">Chưa có dòng nào.</td></tr></tbody>
+    </table>
+    </div>
+  </div>
+  <div id="notifModal" style="display:none;position:fixed;inset:0;background:rgba(20,30,45,.45);z-index:70;align-items:center;justify-content:center;padding:20px">
+    <div class="card" style="max-width:600px;width:100%;margin:0;max-height:80vh;overflow:auto">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h2 style="margin:0">Thông báo của tôi</h2>
+        <button class="ghost small" id="ntfClose">Đóng</button>
+      </div>
+      <div id="ntfList"><p class="hint">Đang tải…</p></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const WEEK_TARGET = 40;
+let weekStart = startOfWeek(new Date());
+let meId = null;
+let editingId = null;
+
+function startOfWeek(d) {
+  const c = new Date(d);
+  c.setDate(c.getDate() - c.getDay()); // Chủ nhật đầu tuần, giống sheet timesheet
+  c.setHours(0, 0, 0, 0);
+  return c;
+}
+function fmtDate(d) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+// số tuần của timesheet: tính theo ngày Thứ Hai trong tuần đó, khớp file mẫu
+function tsWeek(d) {
+  const s = new Date(d.getTime());
+  s.setHours(12, 0, 0, 0);
+  s.setDate(s.getDate() - s.getDay() + 1);
+  return isoWeek(s);
+}
+// số tuần ISO của năm
+function isoWeek(d) {
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const day = t.getUTCDay() || 7;
+  t.setUTCDate(t.getUTCDate() + 4 - day);
+  const y0 = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+  return { week: Math.ceil((((t - y0) / 86400000) + 1) / 7), year: t.getUTCFullYear() };
+}
+function showMsg(el, text, kind) {
+  el.className = 'msg show ' + (kind || 'info');
+  el.textContent = text;
+}
+async function api(url, opts) {
+  const r = await fetch(url, Object.assign({headers: {'Content-Type': 'application/json'}}, opts || {}));
+  if (r.status === 401) { location.href = '/login'; throw new Error('unauth'); }
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.detail || ('Lỗi ' + r.status));
+  return data;
+}
+
+async function loadDescriptions() {
+  try {
+    const d = await api('/api/descriptions');
+    const sel = $('desc');
+    sel.innerHTML = '<option value="">— chọn mô tả —</option>'
+      + d.items.map(x => `<option value="${x}">${x}</option>`).join('');
+  } catch (e) { /* bỏ qua */ }
+}
+
+async function loadMe() {
+  const me = await api('/api/me');
+  if (me.is_admin) { location.href = '/admin'; return; }
+  meId = me.id;
+  $('who').textContent = me.name + ' · Pers.no ' + me.pers_no;
+  $('empName').textContent = me.name;
+  $('empNo').textContent = 'Pers.no ' + me.pers_no + ' · ' + (me.emp_type === 'E' ? 'Engineer' : 'Worker');
+  $('cpText').textContent = me.cost_place ? me.cost_place.code + ' — ' + me.cost_place.name : 'chưa gán (liên hệ admin)';
+}
+
+// ---------- khoá OT theo loại ngày ----------
+function applyDayRules() {
+  const v = $('work_date').value;
+  if (!v) return;
+  const wd = new Date(v + 'T12:00:00').getDay(); // 0 = CN, 6 = T7
+  const weekend = (wd === 0 || wd === 6);
+  $('ota').disabled = weekend;
+  $('otb').disabled = !weekend;
+  $('ota').style.background = weekend ? '#eef1f6' : '';
+  $('otb').style.background = weekend ? '' : '#eef1f6';
+  if (weekend) { $('ota').value = 0; }
+  else { $('otb').value = 0; }
+  $('otaNote').style.display = weekend ? 'none' : 'inline';
+  $('otbNote').style.display = weekend ? 'inline' : 'none';
+  $('dayType').textContent = weekend
+    ? 'Thứ Bảy / Chủ nhật: chỉ ghi Overtime B'
+    : 'Ngày thường: ghi Overtime A, không có Overtime B';
+  const iw = tsWeek(new Date(v + 'T12:00:00'));
+  $('weekOfDay').textContent = `Thuộc tuần ${iw.week} / năm ${iw.year}`;
+}
+$('work_date').addEventListener('change', applyDayRules);
+
+// ---------- panel number -> tự điền project ----------
+let panelTimer = null;
+$('panel').addEventListener('input', () => {
+  $('project').value = '';
+  clearTimeout(panelTimer);
+  panelTimer = setTimeout(async () => {
+    const q = $('panel').value.trim();
+    if (q.length < 2) { $('panelList').innerHTML = ''; return; }
+    try {
+      const list = await api('/api/panel-search?q=' + encodeURIComponent(q));
+      $('panelList').innerHTML = list.map(p =>
+        `<option value="${p.panel_number}">${p.project_number} — ${(p.description || '').slice(0, 50)}</option>`
+      ).join('');
+      $('panelHint').textContent = list.length + ' panel khớp';
+    } catch (e) { /* bỏ qua lỗi gợi ý */ }
+  }, 250);
+});
+
+async function lookupPanel() {
+  const panel = $('panel').value.trim();
+  if (!panel) { $('project').value = ''; $('panelHint').textContent = ''; return false; }
+  try {
+    const rows = await api('/api/panel-lookup?panel=' + encodeURIComponent(panel));
+    if (rows.length === 1) {
+      $('project').value = rows[0].project_number;
+      $('panelHint').textContent = (rows[0].description || '') + (rows[0].desc_vi ? ' · ' + rows[0].desc_vi.slice(0, 60) : '');
+    } else {
+      $('project').value = rows[0].project_number;
+      $('panelHint').textContent = 'Panel này thuộc ' + rows.length + ' project: '
+        + rows.map(r => r.project_number).join(', ') + ' — đang lấy cái đầu tiên.';
+    }
+    return true;
+  } catch (e) {
+    $('project').value = '';
+    $('panelHint').textContent = e.message;
+    return false;
+  }
+}
+$('panel').addEventListener('change', lookupPanel);
+$('panel').addEventListener('blur', lookupPanel);
+
+// ---------- gửi giờ ----------
+$('entryForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = $('saveBtn');
+  const body = {
+    work_date: $('work_date').value,
+    project_number: $('project').value.trim(),
+    panel_number: $('panel').value.trim() || null,
+    description: $('desc').value.trim() || null,
+    normal_hours: parseFloat($('normal').value || 0),
+    travel_hours: parseFloat($('travel').value || 0),
+    ot_a: $('ota').disabled ? 0 : parseFloat($('ota').value || 0),
+    ot_b: $('otb').disabled ? 0 : parseFloat($('otb').value || 0)
+  };
+  btn.disabled = true;
+  try {
+    if (!body.panel_number) throw new Error('Chưa nhập panel number');
+    if (!body.project_number) {
+      const ok = await lookupPanel();
+      body.project_number = $('project').value.trim();
+      if (!ok || !body.project_number) throw new Error('Panel number không hợp lệ, không tìm ra project');
+    }
+    const cur = await api('/api/me');
+    if (cur.is_admin) throw new Error('Đang đăng nhập bằng tài khoản admin nên không chấm công được. Hãy đăng nhập lại bằng tài khoản nhân viên.');
+    if (cur.id !== meId) throw new Error('Phiên đăng nhập vừa bị đổi trên máy này. Tải lại trang rồi nhập lại giờ.');
+
+    let res;
+    if (editingId) {
+      res = await api('/api/entries/' + editingId, {method: 'PUT', body: JSON.stringify(body)});
+      showMsg($('formMsg'), 'Đã cập nhật dòng giờ và ghi lại file timesheet'
+        + (res.file_path ? ': ' + res.file_path : ''), 'ok');
+      exitEditMode();
+    } else {
+      res = await api('/api/entries', {method: 'POST', body: JSON.stringify(body)});
+      showMsg($('formMsg'), 'Đã lưu ' + body.normal_hours + 'h hành chính'
+        + (body.ot_a || body.ot_b ? ' + OT' : '')
+        + ' cho ' + body.work_date
+        + (res.file_path ? ' · file: ' + res.file_path.split('/').pop() : ''), 'ok');
+    }
+    $('desc').value = '';
+    $('ota').value = 0; $('otb').value = 0; $('travel').value = 0; $('normal').value = 8;
+    weekStart = startOfWeek(new Date(body.work_date + 'T12:00:00'));
+    await loadEntries();
+  } catch (err) {
+    showMsg($('formMsg'), err.message, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+$('resetBtn').addEventListener('click', () => {
+  $('panel').value = ''; $('project').value = ''; $('desc').value = '';
+  $('panelHint').textContent = '';
+  $('normal').value = 8; $('travel').value = 0; $('ota').value = 0; $('otb').value = 0;
+  $('formMsg').className = 'msg';
+  exitEditMode();
+  applyDayRules();
+});
+
+// ---------- sửa dòng đã lưu ----------
+function enterEditMode(r) {
+  editingId = r.id;
+  $('work_date').value = r.work_date;
+  applyDayRules();
+  $('panel').value = r.panel_number || '';
+  $('project').value = r.project_number || '';
+  $('desc').value = r.description || '';
+  // nếu dòng cũ có mô tả không nằm trong danh sách, thêm tạm vào để không mất
+  if (r.description && !Array.from($('desc').options).some(o => o.value === r.description)) {
+    const opt = document.createElement('option');
+    opt.value = r.description; opt.textContent = r.description;
+    $('desc').appendChild(opt);
+    $('desc').value = r.description;
+  }
+  $('normal').value = r.normal_hours || 0;
+  $('travel').value = r.travel_hours || 0;
+  $('ota').value = r.ot_a || 0;
+  $('otb').value = r.ot_b || 0;
+  $('saveBtn').textContent = 'Cập nhật dòng giờ';
+  $('cancelEditBtn').style.display = 'inline-block';
+  $('resetBtn').style.display = 'none';
+  $('formMsg').className = 'msg';
+  document.querySelector('#entryForm').scrollIntoView({behavior: 'smooth', block: 'center'});
+}
+
+function exitEditMode() {
+  editingId = null;
+  $('saveBtn').textContent = 'Lưu giờ';
+  $('cancelEditBtn').style.display = 'none';
+  $('resetBtn').style.display = 'inline-block';
+}
+$('cancelEditBtn').addEventListener('click', () => {
+  exitEditMode();
+  $('panel').value = ''; $('project').value = ''; $('desc').value = '';
+  $('normal').value = 8; $('travel').value = 0; $('ota').value = 0; $('otb').value = 0;
+  $('formMsg').className = 'msg';
+  applyDayRules();
+});
+
+// ---------- bảng tuần + thanh tiến trình ----------
+async function loadEntries() {
+  const start = fmtDate(weekStart);
+  const e = new Date(weekStart); e.setDate(e.getDate() + 6);
+  const data = await api(`/api/entries?start=${start}&end=${fmtDate(e)}`);
+  const fmt = (d) => d.split('-').reverse().join('/');
+  const iw = tsWeek(weekStart);
+  $('weekLabel').textContent = `Tuần ${iw.week}/${iw.year} · ${fmt(start)} — ${fmt(fmtDate(e))}`;
+  $('progTitle').textContent = `Tiến độ tuần ${iw.week}/${iw.year}`;
+  const rows = data.items;
+  const sum = (list) => list.reduce((a, r) => ({
+    n: a.n + r.normal_hours, t: a.t + r.travel_hours, a: a.a + r.ot_a, b: a.b + r.ot_b
+  }), {n: 0, t: 0, a: 0, b: 0});
+  const ok = sum(rows);
+
+  const target = data.week_target || WEEK_TARGET;
+  const pct = Math.min(100, ok.n / target * 100);
+  $('progFill').style.width = pct + '%';
+  $('progFill').classList.toggle('done', ok.n >= target);
+  $('progText').textContent = `${ok.n}h / ${target}h (${Math.round(ok.n / target * 100)}%)`;
+  $('progHint').textContent = ok.n >= target
+    ? `Đã đủ ${target}h hành chính của tuần này.`
+    : `Còn thiếu ${(target - ok.n).toFixed(1)}h hành chính. Overtime không tính vào mức này.`;
+
+  $('totalHint').textContent =
+    `Tuần: normal ${ok.n}h · travel ${ok.t}h · OT A ${ok.a}h · OT B ${ok.b}h`;
+
+  if (!rows.length) {
+    $('rows').innerHTML = '<tr><td colspan="10" class="hint">Chưa có dòng nào trong tuần này.</td></tr>';
+    return;
+  }
+  $('rows').innerHTML = rows.map(r => `
+    <tr>
+      <td>${fmt(r.work_date)}</td>
+      <td><small class="mono">${r.project_number}</small></td>
+      <td><small class="mono">${r.panel_number || '—'}</small></td>
+      <td>${r.description || ''}</td>
+      <td class="num">${r.normal_hours || ''}</td>
+      <td class="num">${r.travel_hours || ''}</td>
+      <td class="num">${r.ot_a || ''}</td>
+      <td class="num">${r.ot_b || ''}</td>
+      <td><small class="mono">${r.cost_place || '—'}</small></td>
+      <td class="row-actions">
+        <button class="small ghost" data-edit="${r.id}">Sửa</button>
+        <button class="small danger" data-del="${r.id}">Xoá</button>
+      </td>
+    </tr>`).join('');
+  document.querySelectorAll('[data-edit]').forEach(b => {
+    b.addEventListener('click', () => {
+      const row = rows.find(x => String(x.id) === b.dataset.edit);
+      if (row) enterEditMode(row);
+    });
+  });
+  document.querySelectorAll('[data-del]').forEach(b => {
+    b.addEventListener('click', async () => {
+      if (!confirm('Xoá dòng giờ này?')) return;
+      await api('/api/entries/' + b.dataset.del, {method: 'DELETE'});
+      await loadEntries();
+    });
+  });
+}
+
+$('prevWeek').addEventListener('click', () => { weekStart.setDate(weekStart.getDate() - 7); loadEntries(); });
+$('nextWeek').addEventListener('click', () => { weekStart.setDate(weekStart.getDate() + 7); loadEntries(); });
+$('logout').addEventListener('click', async () => { await fetch('/api/logout', {method: 'POST'}); location.href = '/login'; });
+$('exportBtn').addEventListener('click', () => {
+  window.location.href = '/api/export/week?start=' + fmtDate(weekStart);
+});
+$('downloadBtn').addEventListener('click', () => {
+  window.location.href = '/api/my-timesheet';
+});
+
+// ---------- thông báo ----------
+async function loadNotifBadge() {
+  try {
+    const d = await api('/api/notifications');
+    const b = $('notifBadge');
+    b.style.display = d.unread ? 'inline-block' : 'none';
+    b.textContent = d.unread;
+  } catch (e) { /* bỏ qua */ }
+}
+
+async function openNotifList() {
+  $('notifModal').style.display = 'flex';
+  $('ntfList').innerHTML = '<p class="hint">Đang tải…</p>';
+  try {
+    const d = await api('/api/notifications');
+    $('ntfList').innerHTML = d.items.length ? d.items.map(n => `
+      <div class="card" style="padding:12px 14px;margin-bottom:10px;${n.read_at ? '' : 'border-left:4px solid #1f5f8b'}">
+        <div style="font-weight:600;margin-bottom:4px">${n.title}</div>
+        <div style="font-size:13.5px;color:#3c4759">${n.body}</div>
+        <div class="hint" style="margin-top:6px">${(n.created_at || '').replace('T', ' ').slice(0, 16)}</div>
+      </div>`).join('') : '<p class="hint">Chưa có thông báo nào. Hệ thống sẽ báo tiến độ vào 7h sáng Thứ Bảy.</p>';
+    await fetch('/api/notifications/read', {method: 'POST'});
+    $('notifBadge').style.display = 'none';
+  } catch (e) {
+    $('ntfList').innerHTML = '<p class="hint">Không tải được thông báo.</p>';
+  }
+}
+$('notifBtn').addEventListener('click', openNotifList);
+$('ntfClose').addEventListener('click', () => { $('notifModal').style.display = 'none'; });
+$('notifModal').addEventListener('click', (e) => {
+  if (e.target === $('notifModal')) $('notifModal').style.display = 'none';
+});
+
+(async function init() {
+  $('work_date').value = fmtDate(new Date());
+  applyDayRules();
+  await loadDescriptions();
+  try { await loadMe(); await loadEntries(); await loadNotifBadge(); } catch (e) { if (e.message !== 'unauth') showMsg($('formMsg'), e.message, 'err'); }
+})();
+</script>
+</body>
+</html>

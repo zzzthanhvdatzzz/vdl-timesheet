@@ -1,0 +1,31 @@
+# Tạo môi trường Python (dùng uv)
+__pycache__/
+*.py[cod]
+.venv/
+.venv-*/
+venv/
+
+# Dữ liệu thật: database, mật khẩu khởi tạo, file timesheet, file admin up lên
+data/app.db
+data/app.db-wal
+data/app.db-shm
+data/credentials.csv
+data/timesheets/
+data/source/_uploads/
+
+# File mẫu timesheet của công ty (không đưa lên repo) - xem README
+data/source/*.xlsx
+
+# Ảnh chụp màn hình khi kiểm thử
+screenshot_*.png
+
+# Cấu hình email chứa mật khẩu ứng dụng
+email.env
+*.env
+
+# Hệ điều hành / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log

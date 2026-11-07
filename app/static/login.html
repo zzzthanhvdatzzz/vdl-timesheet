@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Đăng nhập - Chấm công VDL VN</title>
+  <link rel="stylesheet" href="/static/style.css?v=12">
+</head>
+<body>
+  <div class="wrap">
+    <div class="login-box">
+      <div class="brand">
+        <div class="t">Chấm công VDL VN</div>
+        <div class="s">Timesheet 2026</div>
+      </div>
+      <div class="card">
+        <h2>Đăng nhập</h2>
+        <form id="f">
+          <div class="grid" style="margin-bottom:12px">
+            <div>
+              <label for="u">Tên đăng nhập</label>
+              <input id="u" name="username" type="text" autocomplete="username" required autofocus>
+            </div>
+            <div>
+              <label for="p">Mật khẩu</label>
+              <input id="p" name="password" type="password" autocomplete="current-password" required>
+            </div>
+          </div>
+          <button type="submit" style="width:100%">Vào hệ thống</button>
+          <div class="msg err" id="m"></div>
+        </form>
+      </div>
+      <p class="hint" style="text-align:center">
+        <a href="#" id="forgotLink" style="color:#1f5f8b">Quên mật khẩu?</a>
+      </p>
+
+      <div class="card" id="forgotBox" style="display:none">
+        <h2>Yêu cầu cấp lại mật khẩu</h2>
+        <p class="hint" style="margin-top:-6px">Gửi yêu cầu tới admin. Admin sẽ cấp mật khẩu mới cho bạn.</p>
+        <form id="ff">
+          <div class="grid" style="margin-bottom:12px">
+            <div>
+              <label for="fu">Tên đăng nhập của bạn</label>
+              <input id="fu" type="text" required>
+            </div>
+            <div>
+              <label for="fn">Ghi chú cho admin (không bắt buộc)</label>
+              <input id="fn" type="text" placeholder="VD: quên mật khẩu, số điện thoại...">
+            </div>
+          </div>
+          <button type="submit" style="width:100%">Gửi yêu cầu</button>
+          <div class="msg" id="fm"></div>
+        </form>
+      </div>
+    </div>
+  </div>
+<script>
+document.getElementById('f').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const m = document.getElementById('m');
+  m.className = 'msg err';
+  const body = {
+    username: document.getElementById('u').value.trim(),
+    password: document.getElementById('p').value
+  };
+  const r = await fetch('/api/login', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    m.textContent = d.detail || 'Đăng nhập thất bại';
+    m.classList.add('show');
+    return;
+  }
+  location.href = d.is_admin ? '/admin' : '/worker';
+});
+
+document.getElementById('forgotLink').addEventListener('click', (e) => {
+  e.preventDefault();
+  const box = document.getElementById('forgotBox');
+  box.style.display = box.style.display === 'none' ? 'block' : 'none';
+});
+
+document.getElementById('ff').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const fm = document.getElementById('fm');
+  const r = await fetch('/api/password-request', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({username: document.getElementById('fu').value.trim(),
+                          note: document.getElementById('fn').value.trim() || null})
+  });
+  const d = await r.json().catch(() => ({}));
+  fm.className = 'msg show ' + (r.ok ? 'ok' : 'err');
+  fm.textContent = r.ok
+    ? 'Đã gửi yêu cầu. Admin sẽ liên hệ cấp mật khẩu mới cho bạn.'
+    : (d.detail || 'Gửi yêu cầu thất bại');
+  if (r.ok) document.getElementById('ff').reset();
+});
+</script>
+</body>
+</html>

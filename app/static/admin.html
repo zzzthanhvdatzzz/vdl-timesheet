@@ -1,0 +1,637 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admin - Chấm công VDL VN</title>
+  <link rel="stylesheet" href="/static/style.css?v=12">
+</head>
+<body>
+<header class="topbar">
+  <h1>ADMIN · CHẤM CÔNG VDL VN</h1>
+  <span class="spacer"></span>
+  <span class="who" id="who"></span>
+  <button class="ghost small" id="reportBtn" title="Danh sách người chưa đủ 40h tuần trước">
+    📋 Báo cáo tuần <span id="reportBadge" style="display:none;background:#b02a2a;color:#fff;border-radius:10px;padding:0 6px;font-size:11px;margin-left:4px">0</span>
+  </button>
+  <button class="ghost small" id="notifBtn" title="Thông báo">
+    🔔 Thông báo <span id="notifBadge" style="display:none;background:#b02a2a;color:#fff;border-radius:10px;padding:0 6px;font-size:11px;margin-left:4px">0</span>
+  </button>
+  <a href="/account" class="ghost small" style="background:#eaeef4;color:#1d2433;text-decoration:none;padding:5px 10px;border-radius:7px;font-size:12px;font-weight:500">Đổi mật khẩu</a>
+  <button class="ghost small" id="logout">Đăng xuất</button>
+</header>
+
+<div class="wrap">
+  <div class="tabs">
+    <button class="active" data-tab="emp">Nhân viên &amp; cost place</button>
+    <button data-tab="panel">Project / Panel</button>
+    <button data-tab="entries">Giờ đã chấm</button>
+    <button data-tab="pwreq">Yêu cầu mật khẩu <span id="reqBadge" class="badge-role" style="display:none"></span></button>
+  </div>
+
+  <section class="section active" id="sec-emp">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h2 style="margin:0">Gán cost place (chỉ admin)</h2>
+        <button class="small" id="addEmpBtn">+ Thêm nhân viên</button>
+      </div>
+      <p class="hint" style="margin-top:-6px">Đổi cost place ở đây là đổi luôn mã in trên timesheet của nhân viên đó ở các dòng mới.</p>
+      <div style="overflow-x:auto">
+        <table>
+          <thead>
+            <tr><th>Pers.no</th><th>Họ tên</th><th>Loại</th><th>Username</th><th>Cost place</th><th>Trạng thái</th><th></th></tr>
+          </thead>
+          <tbody id="empRows"><tr><td colspan="7" class="hint">Đang tải…</td></tr></tbody>
+        </table>
+      </div>
+      <div class="msg" id="empMsg"></div>
+    </div>
+  </section>
+
+  <section class="section" id="sec-panel">
+    <div class="card">
+      <h2>Thêm / sửa panel</h2>
+      <form id="panelForm">
+        <div class="grid cols-4" style="margin-bottom:12px">
+          <div><label for="pProj">Project number</label><input id="pProj" type="text" placeholder="V3190.100.00.50" required></div>
+          <div><label for="pPanel">Panel number</label><input id="pPanel" type="text" placeholder="3190-50-2001" required></div>
+          <div><label for="pDesc">Description</label><input id="pDesc" type="text" placeholder="AMS CABINET AFT"></div>
+          <div><label for="pDescVi">Miêu tả (VN)</label><input id="pDescVi" type="text" placeholder="Tủ điện báo động chung…"></div>
+        </div>
+        <button type="submit">Lưu panel</button>
+        <div class="msg" id="panelMsg"></div>
+      </form>
+    </div>
+    <div class="card">
+      <h2>Danh sách project</h2>
+      <input id="projSearch" type="text" placeholder="Tìm project number…" style="margin-bottom:12px">
+      <table>
+        <thead><tr><th>Project number</th><th class="num">Số panel</th></tr></thead>
+        <tbody id="projRows"><tr><td colspan="2" class="hint">Đang tải…</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="section" id="sec-entries">
+    <div class="card">
+      <h2>Xuất Excel theo mẫu timesheet</h2>
+      <div class="grid cols-4" style="margin-bottom:12px">
+        <div><label for="exEmp">Nhân viên</label><select id="exEmp"><option value="">— chọn —</option></select></div>
+        <div><label for="exDate">Ngày trong tuần cần xuất</label><input id="exDate" type="date"></div>
+        <div style="display:flex;align-items:flex-end"><button id="exBtn" style="width:100%">Xuất file .xlsx</button></div>
+      </div>
+      <p class="hint" style="margin-top:-4px">File tạo ra đúng form gốc FORM TIMESHEET 2026 VDL VN, điền sẵn tên, pers.no, tuần và giờ đã chấm.</p>
+      <div class="msg" id="exMsg"></div>
+    </div>
+    <div class="card">
+      <h2>Giờ đã chấm (7 ngày gần nhất)</h2>
+      <input id="entrySearch" type="text" placeholder="Tìm theo tên hoặc project…" style="margin-bottom:12px">
+      <div style="overflow-x:auto">
+        <table>
+          <thead>
+            <tr><th>Ngày</th><th>Tuần</th><th>Pers.no</th><th>Nhân viên</th><th>Project</th><th>Panel</th><th>Mô tả</th>
+                <th class="num">Normal</th><th class="num">Travel</th><th class="num">OT A</th><th class="num">OT B</th><th>Cost place</th><th>Trạng thái</th></tr>
+          </thead>
+          <tbody id="entryRows"><tr><td colspan="13" class="hint">Đang tải…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="sec-pwreq">
+    <div class="card">
+      <h2>Yêu cầu cấp lại mật khẩu</h2>
+      <p class="hint" style="margin-top:-6px">Bấm “Cấp MK mới”: hệ thống sinh mật khẩu tạm, hiện ra để bạn đọc cho nhân viên. Nhân viên nên đổi lại sau khi đăng nhập.</p>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th>Thời điểm</th><th>Pers.no</th><th>Nhân viên</th><th>Username</th><th>Ghi chú</th><th>Trạng thái</th><th></th></tr></thead>
+          <tbody id="reqRows"><tr><td colspan="7" class="hint">Đang tải…</td></tr></tbody>
+        </table>
+      </div>
+      <div class="msg" id="reqMsg"></div>
+    </div>
+  </section>
+
+  <div id="empModal" style="display:none;position:fixed;inset:0;background:rgba(20,30,45,.45);z-index:75;align-items:center;justify-content:center;padding:20px">
+    <div class="card" style="max-width:600px;width:100%;margin:0">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h2 style="margin:0">Thêm nhân viên</h2>
+        <button class="ghost small" id="empClose">Đóng</button>
+      </div>
+      <form id="empForm">
+        <div class="grid cols-2" style="margin-bottom:12px">
+          <div><label for="nPersNo">Pers.no</label><input id="nPersNo" type="number" min="1" max="9999" required></div>
+          <div><label for="nName">Họ tên</label><input id="nName" type="text" placeholder="NGUYEN VAN A" required></div>
+          <div><label for="nType">Loại</label>
+            <select id="nType"><option value="P">P — Worker</option><option value="E">E — Engineer</option></select>
+          </div>
+          <div><label for="nCost">Cost place</label><select id="nCost"><option value="">— chưa gán —</option></select></div>
+          <div><label for="nUser">Tên đăng nhập</label><input id="nUser" type="text" placeholder="để trống = nvXX"></div>
+          <div><label for="nPass">Mật khẩu khởi tạo</label><input id="nPass" type="text" placeholder="để trống = vdl@XX"></div>
+        </div>
+        <button type="submit">Tạo nhân viên</button>
+        <div class="msg" id="empFormMsg"></div>
+      </form>
+    </div>
+  </div>
+  <div id="fileModal" style="display:none;position:fixed;inset:0;background:rgba(20,30,45,.45);z-index:50;align-items:center;justify-content:center;padding:20px">
+    <div class="card" style="max-width:680px;width:100%;margin:0">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <h2 style="margin:0" id="fmTitle">File timesheet</h2>
+        <button class="ghost small" id="fmClose">Đóng</button>
+      </div>
+      <div class="hint" id="fmFolder" style="margin-bottom:12px;word-break:break-all"></div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
+        <input id="fmFile" type="file" accept=".xlsx,.xlsm" style="width:auto;padding:7px 8px">
+        <button id="fmUpload" class="small">Up file lên hệ thống</button>
+        <a id="fmZip" class="small ghost" style="text-decoration:none;padding:6px 10px;border-radius:7px;background:#eaeef4;color:#1d2433" href="#">Tải tất cả (.zip)</a>
+      </div>
+      <p class="hint" style="margin-top:-6px">Up file xong, dữ liệu trong file được ghi vào hệ thống và file chuẩn của nhân viên được tạo lại. Sau đó nhân viên sửa giờ trên web thì file này lại được cập nhật.</p>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th>Tên file</th><th class="num">Dung lượng</th><th>Cập nhật lúc</th><th></th></tr></thead>
+          <tbody id="fmRows"><tr><td colspan="4" class="hint">Đang tải…</td></tr></tbody>
+        </table>
+      </div>
+      <div class="msg" id="fmMsg"></div>
+    </div>
+  </div>
+  <div id="weekModal" style="display:none;position:fixed;inset:0;background:rgba(20,30,45,.45);z-index:60;align-items:center;justify-content:center;padding:20px">
+    <div class="card" style="max-width:760px;width:100%;margin:0;max-height:86vh;overflow:auto">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <h2 style="margin:0" id="wkTitle">Báo cáo tuần</h2>
+        <button class="ghost small" id="wkClose">Đóng</button>
+      </div>
+      <div class="hint" id="wkMeta" style="margin-bottom:14px"></div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+        <label style="text-transform:none;font-size:13px;color:#1d2433;margin:0">Tuần bắt đầu</label>
+        <input id="wkDate" type="date" style="width:auto;padding:6px 8px">
+        <button class="small ghost" id="wkLoad">Xem tuần này</button>
+        <span class="hint" id="wkSaved"></span>
+      </div>
+      <table>
+        <thead><tr><th>Pers.no</th><th>Nhân viên</th><th class="num">Giờ hành chính</th><th class="num">Còn thiếu</th><th class="num">OT</th></tr></thead>
+        <tbody id="wkRows"><tr><td colspan="5" class="hint">Đang tải…</td></tr></tbody>
+      </table>
+      <div class="msg" id="wkMsg"></div>
+    </div>
+  </div>
+  <div id="notifModal" style="display:none;position:fixed;inset:0;background:rgba(20,30,45,.45);z-index:70;align-items:center;justify-content:center;padding:20px">
+    <div class="card" style="max-width:640px;width:100%;margin:0;max-height:80vh;overflow:auto">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h2 style="margin:0">Thông báo</h2>
+        <button class="ghost small" id="ntfClose">Đóng</button>
+      </div>
+      <div id="ntfList"><p class="hint">Đang tải…</p></div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px;border-top:1px solid #dfe4ec;padding-top:12px">
+        <span class="hint" id="mailStatus"></span>
+        <button class="small ghost" id="mailTest">Gửi thử email</button>
+      </div>
+      <div class="msg" id="mailMsg"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let costCentres = [];
+
+function showMsg(el, text, kind) {
+  el.className = 'msg show ' + (kind || 'info');
+  el.textContent = text;
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.className = 'msg'; }, 4000);
+}
+
+async function api(url, opts) {
+  const r = await fetch(url, Object.assign({headers: {'Content-Type': 'application/json'}}, opts || {}));
+  if (r.status === 401) { location.href = '/login'; throw new Error('unauth'); }
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.detail || ('Lỗi ' + r.status));
+  return data;
+}
+
+document.querySelectorAll('.tabs button').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('.tabs button').forEach(x => x.classList.remove('active'));
+    document.querySelectorAll('.section').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    $('sec-' + b.dataset.tab).classList.add('active');
+    if (b.dataset.tab === 'proj') loadProjects();
+    if (b.dataset.tab === 'entries') { fillExportEmployees(); loadEntries(); }
+    if (b.dataset.tab === 'pwreq') loadRequests();
+  });
+});
+
+async function loadMe() {
+  const me = await api('/api/me');
+  if (!me.is_admin) { location.href = '/worker'; return; }
+  $('who').textContent = me.name + ' (admin)';
+}
+
+async function loadCostCentres() {
+  costCentres = await api('/api/admin/cost-centres');
+}
+
+async function loadEmployees() {
+  const emps = await api('/api/admin/employees');
+  employeesCache = emps;
+  const opts = (code) => costCentres.map(c =>
+    `<option value="${c.code}" ${c.code === code ? 'selected' : ''}>${c.code} — ${c.name}</option>`).join('');
+  $('empRows').innerHTML = emps.map(e => `
+    <tr data-emp="${e.id}">
+      <td>${e.pers_no || '—'}</td>
+      <td>${e.name}${e.is_admin ? ' <span class="badge-role">admin</span>' : ''}</td>
+      <td>${e.emp_type || ''}</td>
+      <td><small class="mono">${e.username}</small></td>
+      <td><select data-cp="${e.id}" style="min-width:230px">${opts(e.cost_place_code)}</select></td>
+      <td>${e.active ? 'đang làm' : 'đã khoá'}</td>
+      <td class="row-actions">
+        <button class="small" data-save="${e.id}">Lưu</button>
+        <button class="small ghost" data-files="${e.id}" title="Xem file timesheet trên máy">…</button>
+        <button class="small ghost" data-pw="${e.id}">Đặt lại MK</button>
+      </td>
+    </tr>`).join('');
+
+  document.querySelectorAll('[data-save]').forEach(b => b.addEventListener('click', async () => {
+    const id = b.dataset.save;
+    const code = document.querySelector(`[data-cp="${id}"]`).value;
+    try {
+      await api('/api/admin/employees/' + id, {method: 'PATCH', body: JSON.stringify({cost_place_code: code})});
+      showMsg($('empMsg'), 'Đã cập nhật cost place', 'ok');
+    } catch (e) { showMsg($('empMsg'), e.message, 'err'); }
+  }));
+
+  document.querySelectorAll('[data-files]').forEach(b => b.addEventListener('click', () => openTimesheetFiles(b.dataset.files)));
+
+  document.querySelectorAll('[data-pw]').forEach(b => b.addEventListener('click', async () => {
+    const id = b.dataset.pw;
+    const pw = prompt('Mật khẩu mới (tối thiểu 6 ký tự):');
+    if (!pw) return;
+    try {
+      await api('/api/admin/employees/' + id + '/password', {method: 'POST', body: JSON.stringify({new_password: pw})});
+      showMsg($('empMsg'), 'Đã đặt lại mật khẩu (nhân viên bị đăng xuất)', 'ok');
+    } catch (e) { showMsg($('empMsg'), e.message, 'err'); }
+  }));
+}
+
+async function loadProjects() {
+  const q = $('projSearch').value.trim();
+  const rows = await api('/api/admin/projects' + (q ? '?q=' + encodeURIComponent(q) : ''));
+  $('projRows').innerHTML = rows.length ? rows.map(r =>
+    `<tr><td><small class="mono">${r.project_number}</small></td><td class="num">${r.n}</td></tr>`).join('')
+    : '<tr><td colspan="2" class="hint">Không có project khớp.</td></tr>';
+}
+
+async function loadEntries() {
+  const q = $('entrySearch').value.trim();
+  const rows = await api('/api/admin/entries' + (q ? '?q=' + encodeURIComponent(q) : ''));
+  const fmt = (d) => d.split('-').reverse().join('/');
+  $('entryRows').innerHTML = rows.length ? rows.map(r => `    <tr>
+      <td>${fmt(r.work_date)}</td><td>${tsWeek(new Date(r.work_date + 'T12:00:00')).week}</td><td>${r.pers_no}</td><td>${r.employee_name}</td>
+      <td><small class="mono">${r.project_number}</small></td>
+      <td><small class="mono">${r.panel_number || '—'}</small></td>
+      <td>${r.description || ''}</td>
+      <td class="num">${r.normal_hours}</td><td class="num">${r.travel_hours}</td>
+      <td class="num">${r.ot_a}</td><td class="num">${r.ot_b}</td>
+      <td><small class="mono">${r.cost_place || '—'}</small></td>
+      <td><span class="badge-role" style="background:#eaf7f0;color:#176147">đã ghi</span></td>
+    </tr>`).join('') : '<tr><td colspan="13" class="hint">Chưa có dòng giờ nào trong 7 ngày qua.</td></tr>';
+}
+
+$('panelForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const body = {
+    project_number: $('pProj').value.trim(),
+    panel_number: $('pPanel').value.trim(),
+    description: $('pDesc').value.trim() || null,
+    desc_vi: $('pDescVi').value.trim() || null
+  };
+  try {
+    await api('/api/admin/panels', {method: 'POST', body: JSON.stringify(body)});
+    showMsg($('panelMsg'), 'Đã lưu panel', 'ok');
+    $('pPanel').value = ''; $('pDesc').value = ''; $('pDescVi').value = '';
+    loadProjects();
+  } catch (err) { showMsg($('panelMsg'), err.message, 'err'); }
+});
+
+let pt = null;
+$('projSearch').addEventListener('input', () => { clearTimeout(pt); pt = setTimeout(loadProjects, 250); });
+let et = null;
+$('entrySearch').addEventListener('input', () => { clearTimeout(et); et = setTimeout(loadEntries, 250); });
+$('logout').addEventListener('click', async () => { await fetch('/api/logout', {method: 'POST'}); location.href = '/login'; });
+
+function fmtLocal(d) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+function isoWeek(d) {
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const day = t.getUTCDay() || 7;
+  t.setUTCDate(t.getUTCDate() + 4 - day);
+  const y0 = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+  return { week: Math.ceil((((t - y0) / 86400000) + 1) / 7), year: t.getUTCFullYear() };
+}
+function tsWeek(d) {
+  const s = new Date(d.getTime());
+  s.setHours(12, 0, 0, 0);
+  s.setDate(s.getDate() - s.getDay() + 1);
+  return isoWeek(s);
+}
+function sundayOf(d) {
+  const c = new Date(d.getTime());
+  c.setHours(12, 0, 0, 0);
+  c.setDate(c.getDate() - c.getDay());
+  return fmtLocal(c);
+}
+
+// ---------- xuất Excel ----------
+let employeesCache = [];
+function fillExportEmployees() {
+  const sel = $('exEmp');
+  if (sel.options.length > 1) return;
+  sel.innerHTML = '<option value="">— chọn —</option>' + employeesCache
+    .filter(e => !e.is_admin)
+    .map(e => `<option value="${e.id}">${e.pers_no} · ${e.name}</option>`).join('');
+  if (!$('exDate').value) $('exDate').value = fmtLocal(new Date());
+}
+
+$('exBtn').addEventListener('click', () => {
+  const empId = $('exEmp').value;
+  const day = $('exDate').value;
+  if (!empId || !day) { showMsg($('exMsg'), 'Chọn nhân viên và ngày trước đã', 'err'); return; }
+  const start = sundayOf(new Date(day + 'T12:00:00'));
+  const iw = tsWeek(new Date(start + 'T12:00:00'));
+  window.location.href = `/api/admin/export?employee_id=${empId}&start=${start}`;
+  showMsg($('exMsg'), `Đang tạo file cho tuần ${iw.week}/${iw.year} (từ ` + start.split('-').reverse().join('/') + ')', 'info');
+});
+
+
+
+// ---------- file timesheet trên máy chủ ----------
+let currentFilesEmp = null;
+function fmtSize(n) {
+  return n > 1024 * 1024 ? (n / 1024 / 1024).toFixed(2) + ' MB' : Math.round(n / 1024) + ' KB';
+}
+async function openTimesheetFiles(empId) {
+  const modal = $('fileModal');
+  modal.style.display = 'flex';
+  currentFilesEmp = empId;
+  $('fmRows').innerHTML = '<tr><td colspan="4" class="hint">Đang tải…</td></tr>';
+  $('fmFolder').textContent = '';
+  $('fmMsg').className = 'msg';
+  $('fmZip').href = '/api/admin/timesheet-zip?employee_id=' + empId;
+  try {
+    const data = await api('/api/admin/timesheet-files?employee_id=' + empId);
+    $('fmTitle').textContent = 'File timesheet · ' + data.employee;
+    $('fmFolder').textContent = 'Nơi lưu trên máy chủ (không phải máy bạn): ' + data.folder;
+    $('fmRows').innerHTML = data.files.length ? data.files.map(f => `
+      <tr>
+        <td><small class="mono">${f.name}</small>${f.is_master ? ' <span class="badge-role" style="background:#eaf7f0;color:#176147">đang dùng</span>' : `<button class="small ghost" data-use="${f.name}" title="Dùng file này để ghi dữ liệu">Dùng file này</button>`}</td>
+        <td class="num">${fmtSize(f.size)}</td>
+        <td>${f.mtime.replace('T', ' ').slice(0, 16)}</td>
+        <td><a class="small ghost" style="text-decoration:none;padding:5px 10px;border-radius:7px;background:#eaeef4;color:#1d2433" href="${f.url}">Tải về</a>
+            <button class="small danger" data-unlink="${f.name}">Xoá</button></td>
+      </tr>`).join('')
+      : '<tr><td colspan="4" class="hint">Nhân viên này chưa có file timesheet nào.</td></tr>';
+    document.querySelectorAll('[data-use]').forEach(b => b.addEventListener('click', async () => {
+      try {
+        await api(`/api/admin/timesheet-use?employee_id=${currentFilesEmp}&name=${encodeURIComponent(b.dataset.use)}`, {method: 'POST'});
+        showMsg($('fmMsg'), 'Từ giờ dữ liệu sẽ ghi vào file ' + b.dataset.use, 'ok');
+        await openTimesheetFiles(currentFilesEmp);
+      } catch (e) { showMsg($('fmMsg'), e.message, 'err'); }
+    }));
+    document.querySelectorAll('[data-unlink]').forEach(b => b.addEventListener('click', async () => {
+      const name = b.dataset.unlink;
+      if (!confirm('Xoá file ' + name + ' trên máy chủ?\nHệ thống sẽ tự tạo lại file này ở lần lưu giờ kế tiếp.')) return;
+      try {
+        await api(`/api/admin/timesheet-file?employee_id=${currentFilesEmp}&name=${encodeURIComponent(name)}`, {method: 'DELETE'});
+        showMsg($('fmMsg'), 'Đã xoá ' + name, 'ok');
+        await openTimesheetFiles(currentFilesEmp);
+      } catch (e) { showMsg($('fmMsg'), e.message, 'err'); }
+    }));
+  } catch (e) {
+    showMsg($('fmMsg'), e.message, 'err');
+  }
+}
+$('fmClose').addEventListener('click', () => { $('fileModal').style.display = 'none'; });
+$('fileModal').addEventListener('click', (e) => {
+  if (e.target === $('fileModal')) $('fileModal').style.display = 'none';
+});
+
+$('fmUpload').addEventListener('click', async () => {
+  if (!currentFilesEmp) return;
+  const inp = $('fmFile');
+  if (!inp.files.length) { showMsg($('fmMsg'), 'Chọn file .xlsx trước đã', 'err'); return; }
+  const fd = new FormData();
+  fd.append('file', inp.files[0]);
+  $('fmUpload').disabled = true;
+  try {
+    const r = await fetch('/api/admin/timesheet-upload?employee_id=' + currentFilesEmp, {
+      method: 'POST', body: fd
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.detail || ('Lỗi ' + r.status));
+    showMsg($('fmMsg'), `Đã up file: ${d.imported} dòng giờ của tuần bắt đầu `
+      + d.week_start.split('-').reverse().join('/') + ' · file: '
+      + (d.file_path || '').split('/').pop(), 'ok');
+    inp.value = '';
+    await openTimesheetFiles(currentFilesEmp);
+  } catch (e) {
+    showMsg($('fmMsg'), e.message, 'err');
+  } finally {
+    $('fmUpload').disabled = false;
+  }
+});
+
+// ---------- thêm nhân viên ----------
+$('addEmpBtn').addEventListener('click', () => {
+  const sel = $('nCost');
+  sel.innerHTML = '<option value="">— chưa gán —</option>' + costCentres
+    .map(c => `<option value="${c.code}">${c.code} — ${c.name}</option>`).join('');
+  const next = Math.max(0, ...employeesCache.map(e => e.pers_no || 0)) + 1;
+  $('nPersNo').value = next;
+  $('nName').value = ''; $('nUser').value = ''; $('nPass').value = '';
+  $('empFormMsg').className = 'msg';
+  $('empModal').style.display = 'flex';
+});
+$('empClose').addEventListener('click', () => { $('empModal').style.display = 'none'; });
+$('empModal').addEventListener('click', (e) => {
+  if (e.target === $('empModal')) $('empModal').style.display = 'none';
+});
+
+$('empForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const body = {
+    pers_no: Number($('nPersNo').value),
+    name: $('nName').value.trim(),
+    emp_type: $('nType').value,
+    cost_place_code: $('nCost').value || null,
+    username: $('nUser').value.trim() || null,
+    password: $('nPass').value.trim() || null,
+  };
+  try {
+    const d = await api('/api/admin/employees', {method: 'POST', body: JSON.stringify(body)});
+    showMsg($('empFormMsg'),
+      `Đã thêm ${d.name} (pers.no ${d.pers_no}). Đăng nhập: ${d.username} / ${d.password}`, 'ok');
+    await loadEmployees();
+    setTimeout(() => { $('empModal').style.display = 'none'; }, 2500);
+  } catch (err) {
+    showMsg($('empFormMsg'), err.message, 'err');
+  }
+});
+
+// ---------- thông báo ----------
+async function loadNotifBadge() {
+  try {
+    const d = await api('/api/notifications');
+    const b = $('notifBadge');
+    b.style.display = d.unread ? 'inline-block' : 'none';
+    b.textContent = d.unread;
+  } catch (e) { /* bỏ qua */ }
+}
+
+async function openNotifList() {
+  $('notifModal').style.display = 'flex';
+  $('ntfList').innerHTML = '<p class="hint">Đang tải…</p>';
+  try {
+    const d = await api('/api/notifications');
+    $('ntfList').innerHTML = d.items.length ? d.items.map(n => `
+      <div class="card" style="padding:12px 14px;margin-bottom:10px;${n.read_at ? '' : 'border-left:4px solid #1f5f8b'}">
+        <div style="font-weight:600;margin-bottom:4px">${n.title}</div>
+        <div style="font-size:13.5px;color:#3c4759">${n.body}</div>
+        <div class="hint" style="margin-top:6px">${(n.created_at || '').replace('T', ' ').slice(0, 16)}</div>
+      </div>`).join('') : '<p class="hint">Chưa có thông báo nào.</p>';
+    await fetch('/api/notifications/read', {method: 'POST'});
+    $('notifBadge').style.display = 'none';
+    await loadMailStatus();
+  } catch (e) {
+    $('ntfList').innerHTML = '<p class="hint">Không tải được thông báo.</p>';
+  }
+}
+
+async function loadMailStatus() {
+  try {
+    const d = await api('/api/admin/email-status');
+    $('mailStatus').textContent = d.configured
+      ? `Email: đang gửi tới ${d.to} · còn ${d.queued} email chờ`
+      : 'Email: chưa cấu hình (tạo ~/.config/vdl-timesheet/email.env)';
+  } catch (e) { /* bỏ qua */ }
+}
+
+$('mailTest').addEventListener('click', async () => {
+  try {
+    const d = await api('/api/admin/email-test', {method: 'POST'});
+    showMsg($('mailMsg'), `Đã gửi ${d.sent} email thử tới ${d.to}`, 'ok');
+    await loadMailStatus();
+  } catch (e) { showMsg($('mailMsg'), e.message, 'err'); }
+});
+
+// ---------- danh sách báo cáo tuần ----------
+async function loadWeekBadge() {
+  try {
+    const d = await api('/api/admin/week-summary');
+    const b = $('reportBadge');
+    b.style.display = d.short_count ? 'inline-block' : 'none';
+    b.textContent = d.short_count;
+    $('reportBtn').title = `Tuần ${d.week_no}/${d.year}: ${d.short_count}/${d.total_employees} người chưa đủ ${d.required_hours}h`;
+  } catch (e) { /* bỏ qua */ }
+}
+
+async function openWeekReport(dateStr) {
+  const modal = $('weekModal');
+  modal.style.display = 'flex';
+  $('wkRows').innerHTML = '<tr><td colspan="5" class="hint">Đang tải…</td></tr>';
+  $('wkMsg').className = 'msg';
+  try {
+    const q = dateStr ? ('?start=' + dateStr) : '';
+    const d = await api('/api/admin/week-summary' + q);
+    const fmt = (x) => x.split('-').reverse().join('/');
+    $('wkTitle').textContent = `Báo cáo tuần ${d.week_no}/${d.year}`;
+    $('wkMeta').textContent = `${fmt(d.week_start)} — ${fmt(d.week_end)} · `
+      + `${d.short_count}/${d.total_employees} người chưa đủ ${d.required_hours}h hành chính`;
+    $('wkDate').value = d.week_start;
+    const list = d.short_list;
+    $('wkRows').innerHTML = list.length ? list.map(r => `
+      <tr>
+        <td>${r.pers_no}</td>
+        <td>${r.name}</td>
+        <td class="num"><b style="color:${r.hours >= d.required_hours ? '#176147' : '#b02a2a'}">${r.hours}h</b></td>
+        <td class="num">${r.missing ? r.missing + 'h' : '—'}</td>
+        <td class="num">${r.ot_hours || ''}</td>
+      </tr>`).join('')
+      : '<tr><td colspan="5" class="hint">Tuần này mọi người đều đủ 40h.</td></tr>';
+  } catch (e) {
+    showMsg($('wkMsg'), e.message, 'err');
+  }
+}
+
+$('reportBtn').addEventListener('click', () => openWeekReport(null));
+$('notifBtn').addEventListener('click', () => openNotifList());
+$('ntfClose').addEventListener('click', () => { $('notifModal').style.display = 'none'; });
+$('notifModal').addEventListener('click', (e) => {
+  if (e.target === $('notifModal')) $('notifModal').style.display = 'none';
+});
+$('wkClose').addEventListener('click', () => { $('weekModal').style.display = 'none'; });
+$('weekModal').addEventListener('click', (e) => {
+  if (e.target === $('weekModal')) $('weekModal').style.display = 'none';
+});
+$('wkLoad').addEventListener('click', () => {
+  if ($('wkDate').value) openWeekReport($('wkDate').value);
+});
+
+function reqStatusLabel(s) {
+  return {pending: 'chờ xử lý', issued: 'đã cấp MK', rejected: 'đã từ chối'}[s] || s;
+}
+
+async function loadRequests() {
+  const rows = await api('/api/admin/password-requests');
+  const pending = rows.filter(r => r.status === 'pending').length;
+  const badge = $('reqBadge');
+  badge.style.display = pending ? 'inline-block' : 'none';
+  badge.textContent = pending;
+  const fmt = (t) => t ? t.replace('T', ' ').slice(0, 16) : '';
+  $('reqRows').innerHTML = rows.length ? rows.map(r => `
+    <tr>
+      <td>${fmt(r.created_at)}</td>
+      <td>${r.pers_no ?? '—'}</td>
+      <td>${r.employee_name || '—'}</td>
+      <td><small class="mono">${r.username}</small></td>
+      <td>${r.note || ''}</td>
+      <td>${reqStatusLabel(r.status)}${r.temp_password ? ` · <b class="mono">${r.temp_password}</b>` : ''}</td>
+      <td class="row-actions">
+        ${r.status === 'pending' ? `
+          <button class="small" data-issue="${r.id}">Cấp MK mới</button>
+          <button class="small ghost" data-reject="${r.id}">Từ chối</button>` : ''}
+      </td>
+    </tr>`).join('') : '<tr><td colspan="7" class="hint">Chưa có yêu cầu nào.</td></tr>';
+
+  document.querySelectorAll('[data-issue]').forEach(b => b.addEventListener('click', async () => {
+    try {
+      const d = await api('/api/admin/password-requests/' + b.dataset.issue + '/issue', {method: 'POST'});
+      showMsg($('reqMsg'), `Đã cấp mật khẩu mới cho ${d.username}: ${d.temp_password}`, 'ok');
+      await loadRequests();
+    } catch (e) { showMsg($('reqMsg'), e.message, 'err'); }
+  }));
+  document.querySelectorAll('[data-reject]').forEach(b => b.addEventListener('click', async () => {
+    try {
+      await api('/api/admin/password-requests/' + b.dataset.reject + '/reject', {method: 'POST'});
+      showMsg($('reqMsg'), 'Đã từ chối yêu cầu', 'info');
+      await loadRequests();
+    } catch (e) { showMsg($('reqMsg'), e.message, 'err'); }
+  }));
+}
+
+(async function init() {
+  try {
+    await loadMe();
+    await loadCostCentres();
+    await loadEmployees();
+    await loadRequests();
+    await loadWeekBadge();
+    await loadNotifBadge();
+  } catch (e) { if (e.message !== 'unauth') showMsg($('empMsg'), e.message, 'err'); }
+})();
+</script>
+</body>
+</html>

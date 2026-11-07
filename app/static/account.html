@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tài khoản - Chấm công VDL VN</title>
+  <link rel="stylesheet" href="/static/style.css?v=12">
+</head>
+<body>
+<header class="topbar">
+  <h1>TÀI KHOẢN</h1>
+  <span class="spacer"></span>
+  <span class="who" id="who"></span>
+  <a href="#" id="backLink" class="ghost small" style="background:#eaeef4;color:#1d2433;padding:5px 10px;border-radius:7px;text-decoration:none;font-size:12px">Quay lại</a>
+  <button class="ghost small" id="logout">Đăng xuất</button>
+</header>
+
+<div class="wrap" style="max-width:640px">
+  <div class="card">
+    <div class="grid cols-2">
+      <div>
+        <label>Nhân viên</label>
+        <div id="empName" style="font-weight:600;padding-top:4px">—</div>
+        <div class="hint" id="empNo"></div>
+      </div>
+      <div>
+        <label>Cost place (chỉ admin sửa)</label>
+        <div class="locked-badge"><span id="cpText">—</span><span class="lock">🔒 cố định</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Đổi mật khẩu</h2>
+    <form id="pwForm">
+      <div class="grid" style="margin-bottom:12px">
+        <div><label for="pwOld">Mật khẩu hiện tại</label><input id="pwOld" type="password" autocomplete="current-password" required></div>
+        <div><label for="pwNew">Mật khẩu mới</label><input id="pwNew" type="password" autocomplete="new-password" minlength="6" required></div>
+        <div><label for="pwNew2">Nhập lại mật khẩu mới</label><input id="pwNew2" type="password" autocomplete="new-password" minlength="6" required></div>
+      </div>
+      <button type="submit">Đổi mật khẩu</button>
+      <button type="button" class="ghost" id="forgotBtn" style="margin-left:8px">Quên mật khẩu?</button>
+      <span class="hint">Tối thiểu 6 ký tự. Đổi xong các thiết bị khác đang đăng nhập sẽ bị thoát.</span>
+      <div class="msg" id="pwMsg"></div>
+      <div class="msg" id="forgotMsg"></div>
+    </form>
+  </div>
+
+  <p class="hint">Không nhớ mật khẩu hiện tại thì bấm nút “Quên mật khẩu?” ở trên, yêu cầu sẽ được gửi tới admin và admin sẽ trao mật khẩu mới cho cậu.</p>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+function showMsg(el, text, kind) {
+  el.className = 'msg show ' + (kind || 'info');
+  el.textContent = text;
+}
+async function api(url, opts) {
+  const r = await fetch(url, Object.assign({headers: {'Content-Type': 'application/json'}}, opts || {}));
+  if (r.status === 401) { location.href = '/login'; throw new Error('unauth'); }
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.detail || ('Lỗi ' + r.status));
+  return d;
+}
+
+let me = null;
+
+$('forgotBtn').addEventListener('click', async () => {
+  if (!me) return;
+  const msg = $('forgotMsg');
+  if (!confirm('Gửi yêu cầu cấp lại mật khẩu tới admin? Admin sẽ liên hệ trao mật khẩu mới cho bạn.')) return;
+  try {
+    const r = await fetch('/api/password-request', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({username: me.username, note: 'Yêu cầu gửi từ trang tài khoản'})
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.detail || 'Gửi yêu cầu thất bại');
+    showMsg(msg, d.already
+      ? 'Yêu cầu trước đó vẫn đang chờ admin xử lý, không cần gửi lại.'
+      : 'Đã gửi yêu cầu tới admin.', 'ok');
+  } catch (err) {
+    showMsg(msg, err.message, 'err');
+  }
+});
+
+$('pwForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if ($('pwNew').value !== $('pwNew2').value) {
+    showMsg($('pwMsg'), 'Hai lần nhập mật khẩu mới không khớp', 'err');
+    return;
+  }
+  try {
+    await api('/api/me/password', {
+      method: 'POST',
+      body: JSON.stringify({old_password: $('pwOld').value, new_password: $('pwNew').value})
+    });
+    $('pwForm').reset();
+    showMsg($('pwMsg'), 'Đã đổi mật khẩu xong', 'ok');
+  } catch (err) { showMsg($('pwMsg'), err.message, 'err'); }
+});
+
+$('logout').addEventListener('click', async () => { await fetch('/api/logout', {method: 'POST'}); location.href = '/login'; });
+
+(async function init() {
+  try {
+    me = await api('/api/me');
+    $('who').textContent = me.name + (me.is_admin ? ' (admin)' : ' · Pers.no ' + me.pers_no);
+    $('empName').textContent = me.name;
+    $('empNo').textContent = me.is_admin ? 'Tài khoản quản trị' : 'Pers.no ' + me.pers_no + ' · ' + (me.emp_type === 'E' ? 'Engineer' : 'Worker');
+    $('cpText').textContent = me.cost_place ? me.cost_place.code + ' — ' + me.cost_place.name : 'chưa gán';
+    const back = me.is_admin ? '/admin' : '/worker';
+    $('backLink').href = back;
+  } catch (e) { if (e.message !== 'unauth') showMsg($('pwMsg'), e.message, 'err'); }
+})();
+</script>
+</body>
+</html>
