@@ -60,11 +60,14 @@
           <label for="project">Project number (tự điền)</label>
           <input id="project" type="text" readonly placeholder="— nhập panel number —">
         </div>
-        <div>
+        <div style="grid-column:1 / -1">
           <label for="desc">Description of proceedings</label>
-          <input id="desc" type="text" list="descList" placeholder="chọn gợi ý rồi sửa thêm, hoặc gõ tay…" autocomplete="off">
-          <datalist id="descList"></datalist>
-          <div class="hint">Danh sách chỉ là gợi ý: chọn một mục rồi gõ thêm hoặc sửa lại tuỳ ý.</div>
+          <select id="desc" required><option value="">— Chọn mô tả —</option></select>
+          <div id="otherDescWrap" hidden style="margin-top:8px">
+            <label for="otherDesc">Other · Mô tả công việc khác</label>
+            <input id="otherDesc" type="text" placeholder="Nhập mô tả công việc…" autocomplete="off">
+          </div>
+          <div class="hint">Chọn một trong 10 mô tả cố định. Chọn Other để nhập nội dung khác.</div>
         </div>
       </div>
       <div class="grid cols-4" style="margin-bottom:14px">
@@ -128,6 +131,7 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
+const esc = value => String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[ch]));
 const WEEK_TARGET = 40;
 let weekStart = startOfWeek(new Date());
 let meId = null;
@@ -166,15 +170,32 @@ async function api(url, opts) {
   const r = await fetch(url, Object.assign({headers: {'Content-Type': 'application/json'}}, opts || {}));
   if (r.status === 401) { location.href = '/login'; throw new Error('unauth'); }
   const data = await r.json().catch(() => ({}));
+  if (r.status === 403 && data && data.must_change_password) {
+    location.href = '/account?first=1';
+    throw new Error('Đổi mật khẩu trước đã');
+  }
   if (!r.ok) throw new Error(data.detail || ('Lỗi ' + r.status));
   return data;
 }
 
+let descriptionOptions = [];
+function toggleOtherDescription() {
+  const other = $('desc').value === 'Other';
+  $('otherDescWrap').hidden = !other;
+  $('otherDesc').required = other;
+  if (!other) $('otherDesc').value = '';
+}
+$('desc').addEventListener('change', toggleOtherDescription);
+function setDescription(value) {
+  $('desc').value = !value ? '' : descriptionOptions.includes(value) ? value : 'Other';
+  toggleOtherDescription();
+  if ($('desc').value === 'Other') $('otherDesc').value = value;
+}
 async function loadDescriptions() {
-  try {
-    const d = await api('/api/descriptions');
-    $('descList').innerHTML = d.items.map(x => `<option value="${x}">`).join('');
-  } catch (e) { /* bỏ qua */ }
+  const d = await api('/api/descriptions');
+  descriptionOptions = d.items;
+  $('desc').replaceChildren(new Option('— Chọn mô tả —', ''),
+    ...d.items.map(x => new Option(x, x)), new Option('Other', 'Other'));
 }
 
 async function loadMe() {
@@ -258,7 +279,8 @@ $('entryForm').addEventListener('submit', async (e) => {
     work_date: $('work_date').value,
     project_number: $('project').value.trim(),
     panel_number: $('panel').value.trim() || null,
-    description: $('desc').value.trim() || null,
+    description_choice: $('desc').value,
+    description: $('desc').value === 'Other' ? $('otherDesc').value.trim() : $('desc').value,
     normal_hours: parseFloat($('normal').value || 0),
     travel_hours: parseFloat($('travel').value || 0),
     ot_a: $('ota').disabled ? 0 : parseFloat($('ota').value || 0),
@@ -289,7 +311,8 @@ $('entryForm').addEventListener('submit', async (e) => {
         + ' cho ' + body.work_date
         + (res.file_path ? ' · file: ' + res.file_path.split('/').pop() : ''), 'ok');
     }
-    $('desc').value = '';
+    if (res.sync_warnings && res.sync_warnings.length) showMsg($('formMsg'), res.sync_warnings.join('\n'), 'err');
+    setDescription('');
     $('ota').value = 0; $('otb').value = 0; $('travel').value = 0; $('normal').value = 8;
     weekStart = startOfWeek(new Date(body.work_date + 'T12:00:00'));
     await loadEntries();
@@ -301,7 +324,7 @@ $('entryForm').addEventListener('submit', async (e) => {
 });
 
 $('resetBtn').addEventListener('click', () => {
-  $('panel').value = ''; $('project').value = ''; $('desc').value = '';
+  $('panel').value = ''; $('project').value = ''; setDescription('');
   $('panelHint').textContent = '';
   $('normal').value = 8; $('travel').value = 0; $('ota').value = 0; $('otb').value = 0;
   $('formMsg').className = 'msg';
@@ -316,7 +339,7 @@ function enterEditMode(r) {
   applyDayRules();
   $('panel').value = r.panel_number || '';
   $('project').value = r.project_number || '';
-  $('desc').value = r.description || '';
+  setDescription(r.description || '');
   $('normal').value = r.normal_hours || 0;
   $('travel').value = r.travel_hours || 0;
   $('ota').value = r.ot_a || 0;
@@ -336,7 +359,7 @@ function exitEditMode() {
 }
 $('cancelEditBtn').addEventListener('click', () => {
   exitEditMode();
-  $('panel').value = ''; $('project').value = ''; $('desc').value = '';
+  $('panel').value = ''; $('project').value = ''; setDescription('');
   $('normal').value = 8; $('travel').value = 0; $('ota').value = 0; $('otb').value = 0;
   $('formMsg').className = 'msg';
   applyDayRules();
@@ -376,14 +399,14 @@ async function loadEntries() {
   $('rows').innerHTML = rows.map(r => `
     <tr>
       <td>${fmt(r.work_date)}</td>
-      <td><small class="mono">${r.project_number}</small></td>
-      <td><small class="mono">${r.panel_number || '—'}</small></td>
-      <td>${r.description || ''}</td>
+      <td><small class="mono">${esc(r.project_number)}</small></td>
+      <td><small class="mono">${esc(r.panel_number || '—')}</small></td>
+      <td>${esc(r.description || '')}</td>
       <td class="num">${r.normal_hours || ''}</td>
       <td class="num">${r.travel_hours || ''}</td>
       <td class="num">${r.ot_a || ''}</td>
       <td class="num">${r.ot_b || ''}</td>
-      <td><small class="mono">${r.cost_place || '—'}</small></td>
+      <td><small class="mono">${esc(r.cost_place || '—')}</small></td>
       <td class="row-actions">
         <button class="small ghost" data-edit="${r.id}">Sửa</button>
         <button class="small danger" data-del="${r.id}">Xoá</button>

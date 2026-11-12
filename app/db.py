@@ -6,6 +6,10 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "data", "app.db")
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS cost_centres (
     code TEXT PRIMARY KEY,
     name TEXT NOT NULL
@@ -21,7 +25,8 @@ CREATE TABLE IF NOT EXISTS employees (
     cost_place_code TEXT REFERENCES cost_centres(code),
     place TEXT,
     is_admin INTEGER NOT NULL DEFAULT 0,
-    active INTEGER NOT NULL DEFAULT 1
+    active INTEGER NOT NULL DEFAULT 1,
+    must_change_password INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS projects (
@@ -64,6 +69,19 @@ CREATE TABLE IF NOT EXISTS entries (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_entries_emp_date ON entries(employee_id, work_date);
+
+CREATE TABLE IF NOT EXISTS timesheet_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    employee_id INTEGER NOT NULL REFERENCES employees(id),
+    filename TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS timesheet_file_weeks (
+    file_id INTEGER NOT NULL REFERENCES timesheet_files(id) ON DELETE CASCADE,
+    week_start TEXT NOT NULL,
+    sheet_name TEXT NOT NULL,
+    PRIMARY KEY(file_id, week_start)
+);
 
 CREATE TABLE IF NOT EXISTS password_requests (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -115,7 +133,9 @@ CREATE TABLE IF NOT EXISTS email_queue (
 
 def connect():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    # FastAPI có thể chuyển dependency và endpoint của cùng request qua các worker thread.
+    # Mỗi request vẫn có connection riêng, đóng bởi get_conn.
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
@@ -138,4 +158,6 @@ def init_db():
         emp_cols = {r["name"] for r in conn.execute("PRAGMA table_info(employees)")}
         if "timesheet_file" not in emp_cols:
             conn.execute("ALTER TABLE employees ADD COLUMN timesheet_file TEXT")
+        if "must_change_password" not in emp_cols:
+            conn.execute("ALTER TABLE employees ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0")
     conn.close()

@@ -111,6 +111,9 @@ $('logout').addEventListener('click', async () => { await fetch('/api/logout', {
     $('cpText').textContent = me.cost_place ? me.cost_place.code + ' — ' + me.cost_place.name : 'chưa gán';
     const back = me.is_admin ? '/admin' : '/worker';
     $('backLink').href = back;
+    if (me.must_change_password || new URLSearchParams(location.search).get('first') === '1') {
+      showMsg($('pwMsg'), 'Bạn đang dùng mật khẩu mặc định. Hãy đổi mật khẩu mới để tiếp tục dùng hệ thống.', 'info');
+    }
   } catch (e) { if (e.message !== 'unauth') showMsg($('pwMsg'), e.message, 'err'); }
 })();
 </script>

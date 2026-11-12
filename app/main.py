@@ -4,6 +4,7 @@ Chạy:  uvicorn app.main:app --host 127.0.0.1 --port 8000
 """
 import os
 import secrets
+import time
 from datetime import date, datetime, timedelta
 
 from fastapi import Cookie, Depends, FastAPI, File, HTTPException, Request, Response, UploadFile
@@ -11,7 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import auth, db, export
+from . import auth, db, export, storage
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATIC_DIR = os.path.join(BASE_DIR, "app", "static")
@@ -20,6 +21,9 @@ COOKIE = "sid"
 MAX_DAY_HOURS = 24.0
 MAX_NORMAL_DAY = 8.0
 WEEK_TARGET_HOURS = 40.0
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # tối đa 20MB mỗi file Excel
+BACKUP_DIR = os.path.join(BASE_DIR, "data", "backups")
+BACKUP_KEEP = 7
 
 # Danh sách mô tả công việc cho ô "Description of proceedings"
 DESCRIPTION_OPTIONS = [
@@ -27,7 +31,9 @@ DESCRIPTION_OPTIONS = [
     "Unpaid leave of absence (nghỉ không lương)",
     "Read document",
     "Mechanical works",
+    "Mechanical works MOD/ Changesets",
     "Equipment installation and Wiring",
+    "Equipment installation and Wiring MOD/ Changesets",
     "Make wooden box and Packing",
     "Mods work relate",
     "Indirect (support store, clean workshop, meeting,…)",
@@ -42,6 +48,9 @@ def _startup():
     db.init_db()
     # Bỏ cơ chế duyệt: mọi dòng đang chờ duyệt chuyển thành đã ghi nhận
     conn = db.connect()
+    storage.migrate_legacy(conn)
+    from . import roster
+    roster.sync_if_changed(conn)
     with conn:
         conn.execute("UPDATE entries SET status = 'approved' WHERE status != 'approved'")
     conn.close()
@@ -80,6 +89,37 @@ def require_admin(user=Depends(current_user)):
     return user
 
 
+# Endpoint vẫn dùng được khi bắt buộc đổi mật khẩu lần đầu
+PASSWORD_CHANGE_PATHS = {
+    "/api/me", "/api/me/password", "/api/logout", "/api/password-request",
+    "/account", "/login", "/api/health", "/favicon.ico",
+}
+
+
+@app.middleware("http")
+async def force_password_change(request: Request, call_next):
+    path = request.url.path
+    if path in PASSWORD_CHANGE_PATHS or path.startswith("/static"):
+        return await call_next(request)
+    sid = request.cookies.get(COOKIE)
+    if sid:
+        conn = db.connect()
+        try:
+            row = conn.execute(
+                "SELECT must_change_password FROM sessions s JOIN employees e ON e.id = s.employee_id"
+                " WHERE s.token = ? AND e.active = 1", (sid,),
+            ).fetchone()
+        finally:
+            conn.close()
+        if row and row["must_change_password"]:
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Bạn phải đổi mật khẩu trước khi dùng hệ thống",
+                         "must_change_password": True},
+            )
+    return await call_next(request)
+
+
 def user_payload(user: dict, conn) -> dict:
     cc = None
     if user.get("cost_place_code"):
@@ -111,6 +151,7 @@ class EntryIn(BaseModel):
     project_number: str
     panel_number: str | None = None
     description: str | None = None
+    description_choice: str | None = None
     normal_hours: float = Field(default=0, ge=0, le=24)
     travel_hours: float = Field(default=0, ge=0, le=24)
     ot_a: float = Field(default=0, ge=0, le=24)
@@ -185,7 +226,8 @@ def login(body: LoginIn, response: Response, conn=Depends(get_conn)):
             (token, row["id"], datetime.now().isoformat(timespec="seconds")),
         )
     response.set_cookie(COOKIE, token, httponly=True, samesite="lax", max_age=60 * 60 * 12)
-    return {"ok": True, "is_admin": bool(row["is_admin"])}
+    return {"ok": True, "is_admin": bool(row["is_admin"]),
+            "must_change_password": bool(row["must_change_password"])}
 
 
 @app.post("/api/logout")
@@ -221,7 +263,7 @@ def projects(q: str = "", limit: int = 20, user=Depends(current_user), conn=Depe
 @app.get("/api/descriptions")
 def descriptions(user=Depends(current_user)):
     """Danh sách mô tả công việc cho ô Description of proceedings."""
-    return {"items": DESCRIPTION_OPTIONS}
+    return {"items": DESCRIPTION_OPTIONS, "other": "Other"}
 
 
 @app.get("/api/panel-search")
@@ -283,30 +325,63 @@ def panels(project: str, user=Depends(current_user), conn=Depends(get_conn)):
     ]
 
 
-def _sync_employee_week(conn, employee_id: int, work_date: date) -> str | None:
-    """Ghi dữ liệu tuần vào file timesheet của nhân viên trên máy chủ.
-
-    Ưu tiên ghi vào chính file .xlsx mà admin đã up lên; nếu chưa có thì tạo file tuần riêng.
-    """
+def _sync_employee_week(conn, employee_id: int, work_date: date, exclude_path=None) -> str | None:
+    """Cập nhật mọi file đã upload có chứa tuần này, lưu trực tiếp trong kho chung."""
     emp = conn.execute("SELECT * FROM employees WHERE id = ?", (employee_id,)).fetchone()
     if not emp:
         return None
     start = export.week_start(work_date)
-    end = start + timedelta(days=6)
-    rows = conn.execute(
-        """SELECT * FROM entries WHERE employee_id = ? AND work_date BETWEEN ? AND ?
-           ORDER BY work_date, id""",
-        (employee_id, start.isoformat(), end.isoformat()),
+    entries = _week_entries(conn, employee_id, start)
+    files = conn.execute(
+        """SELECT f.filename, w.sheet_name FROM timesheet_files f
+           JOIN timesheet_file_weeks w ON w.file_id = f.id
+           WHERE f.employee_id = ? AND w.week_start = ?""", (employee_id, start.isoformat()),
     ).fetchall()
-    entries = [dict(r) for r in rows]
+    path = exclude_path
+    if not files:
+        path = export.write_week_file(dict(emp), entries, start)
+        with conn:
+            storage.register(conn, employee_id, os.path.basename(path),
+                             [{"start": start, "sheet": str(export.week_number(start)[1])}])
+        return path
+    failures = []
+    for record in files:
+        current = os.path.join(export.TIMESHEET_DIR, record["filename"])
+        if exclude_path and os.path.abspath(current) == os.path.abspath(exclude_path):
+            continue
+        try:
+            export.write_into_workbook(current, dict(emp), entries, start, sheet_name=record["sheet_name"])
+            path = current
+        except Exception as exc:
+            failures.append(f"{record['filename']}: {exc}")
+    if failures:
+        raise RuntimeError("; ".join(failures))
+    return path
+
+
+def _sync_for_entry(conn, employee_id, day, warnings):
     try:
-        master = emp["timesheet_file"] if "timesheet_file" in emp.keys() else None
-        if master and os.path.isfile(master):
-            return export.write_into_workbook(master, dict(emp), entries, start)
-        return export.write_week_file(dict(emp), entries, start)
-    except Exception as exc:  # ghi file lỗi thì vẫn không chặn việc lưu giờ
-        print("Lỗi ghi timesheet:", exc)
+        return _sync_employee_week(conn, employee_id, day)
+    except Exception as exc:
+        warnings.append(f"Dữ liệu đã lưu nhưng chưa ghi được Excel. Đóng file Excel đang mở rồi lưu lại dòng giờ để đồng bộ. Chi tiết: {exc}")
         return None
+
+
+def _entry_description(body):
+    choice = body.description_choice
+    if choice in DESCRIPTION_OPTIONS:
+        if body.description and body.description != choice:
+            raise HTTPException(status_code=400, detail="Mô tả cố định không được chỉnh sửa. Chọn Other để nhập nội dung khác.")
+        return choice
+    if choice == "Other":
+        text = (body.description or "").strip()
+        if not text:
+            raise HTTPException(status_code=400, detail="Hãy nhập mô tả cho Other")
+        return text
+    # Tương thích với lựa chọn cố định từ bản giao diện cũ.
+    if choice is None and body.description in DESCRIPTION_OPTIONS:
+        return body.description
+    raise HTTPException(status_code=400, detail="Chọn một trong 10 mô tả cố định hoặc Other")
 
 
 def _entry_dict(r):
@@ -425,20 +500,23 @@ def create_entry(body: EntryIn, user=Depends(current_user), conn=Depends(get_con
         body.ot_a, body.ot_b, body.project_number, body.panel_number,
     )
 
+    description = _entry_description(body)
     with conn:
         cur = conn.execute(
             """INSERT INTO entries(employee_id, work_date, project_number, panel_number, description,
                                    normal_hours, travel_hours, ot_a, ot_b, cost_place,
                                    status, approved_at, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'approved', ?, ?)""",
-            (user["id"], body.work_date.isoformat(), proj, panel, body.description,
+            (user["id"], body.work_date.isoformat(), proj, panel, description,
              body.normal_hours, body.travel_hours, body.ot_a, body.ot_b,
              user["cost_place_code"], datetime.now().isoformat(timespec="seconds"),
              datetime.now().isoformat(timespec="seconds")),
         )
         row = conn.execute("SELECT * FROM entries WHERE id = ?", (cur.lastrowid,)).fetchone()
-    path = _sync_employee_week(conn, user["id"], body.work_date)
+    warnings = []
+    path = _sync_for_entry(conn, user["id"], body.work_date, warnings)
     d = _entry_dict(row)
+    d["sync_warnings"] = warnings
     d["file_path"] = path
     return d
 
@@ -457,22 +535,26 @@ def update_entry(entry_id: int, body: EntryIn, user=Depends(current_user), conn=
         body.ot_a, body.ot_b, body.project_number, body.panel_number, exclude_id=entry_id,
     )
 
+    old_date = date.fromisoformat(row["work_date"])
+    description = _entry_description(body)
     with conn:
         conn.execute(
             """UPDATE entries SET work_date = ?, project_number = ?, panel_number = ?, description = ?,
                    normal_hours = ?, travel_hours = ?, ot_a = ?, ot_b = ?
                WHERE id = ?""",
-            (body.work_date.isoformat(), proj, panel, body.description,
+            (body.work_date.isoformat(), proj, panel, description,
              body.normal_hours, body.travel_hours, body.ot_a, body.ot_b, entry_id),
         )
         row = conn.execute("SELECT * FROM entries WHERE id = ?", (entry_id,)).fetchone()
 
     # ghi lại file của tuần chứa ngày mới và ngày cũ (nếu đổi sang tuần khác)
     paths = []
-    for d in {body.work_date, date.fromisoformat(body.work_date.isoformat())}:
-        paths.append(_sync_employee_week(conn, row["employee_id"], d))
+    warnings = []
+    for day in {export.week_start(body.work_date), export.week_start(old_date)}:
+        paths.append(_sync_for_entry(conn, row["employee_id"], day, warnings))
     out = _entry_dict(row)
     out["file_path"] = paths[-1] if paths else None
+    out["sync_warnings"] = warnings
     return out
 
 
@@ -485,8 +567,9 @@ def delete_entry(entry_id: int, user=Depends(current_user), conn=Depends(get_con
         raise HTTPException(status_code=403, detail="Chỉ xoá được dòng của mình")
     with conn:
         conn.execute("DELETE FROM entries WHERE id = ?", (entry_id,))
-    _sync_employee_week(conn, row["employee_id"], date.fromisoformat(row["work_date"]))
-    return {"ok": True}
+    warnings = []
+    _sync_for_entry(conn, row["employee_id"], date.fromisoformat(row["work_date"]), warnings)
+    return {"ok": True, "sync_warnings": warnings}
 
 
 # ---------------------------------------------------------------- duyệt giờ
@@ -582,12 +665,13 @@ def approve_week(body: ApproveWeekIn, admin=Depends(require_admin), conn=Depends
 
 # ---------------------------------------------------------------- admin api
 @app.get("/api/admin/employees")
-def admin_employees(admin=Depends(require_admin), conn=Depends(get_conn)):
+def admin_employees(admin=Depends(require_admin), conn=Depends(get_conn), include_inactive: bool = False):
     rows = conn.execute(
         """SELECT e.id, e.pers_no, e.name, e.emp_type, e.username, e.cost_place_code,
                   e.place, e.active, e.is_admin, c.name AS cost_place_name
            FROM employees e LEFT JOIN cost_centres c ON c.code = e.cost_place_code
-           ORDER BY e.is_admin DESC, e.pers_no"""
+           WHERE e.active = 1 OR ?
+           ORDER BY e.is_admin DESC, e.pers_no""", (include_inactive,)
     ).fetchall()
     return [dict(r) for r in rows]
 
@@ -646,8 +730,8 @@ def admin_create_employee(body: EmployeeNew, admin=Depends(require_admin), conn=
     with conn:
         cur = conn.execute(
             """INSERT INTO employees(pers_no, name, emp_type, username, password_hash,
-                   cost_place_code, is_admin, active)
-               VALUES (?, ?, ?, ?, ?, ?, 0, 1)""",
+                   cost_place_code, is_admin, active, must_change_password)
+               VALUES (?, ?, ?, ?, ?, ?, 0, 1, 1)""",
             (body.pers_no, name, emp_type, username, auth.hash_password(password), code),
         )
         emp_id = cur.lastrowid
@@ -660,7 +744,7 @@ def admin_reset_password(emp_id: int, body: PasswordIn, admin=Depends(require_ad
     if not conn.execute("SELECT 1 FROM employees WHERE id = ?", (emp_id,)).fetchone():
         raise HTTPException(status_code=404, detail="Không thấy nhân viên")
     with conn:
-        conn.execute("UPDATE employees SET password_hash = ? WHERE id = ?",
+        conn.execute("UPDATE employees SET password_hash = ?, must_change_password = 1 WHERE id = ?",
                      (auth.hash_password(body.new_password), emp_id))
         conn.execute("DELETE FROM sessions WHERE employee_id = ?", (emp_id,))
     return {"ok": True}
@@ -752,7 +836,7 @@ def change_own_password(
         raise HTTPException(status_code=400, detail="Mật khẩu mới phải khác mật khẩu cũ")
     token = auth.new_token()
     with conn:
-        conn.execute("UPDATE employees SET password_hash = ? WHERE id = ?",
+        conn.execute("UPDATE employees SET password_hash = ?, must_change_password = 0 WHERE id = ?",
                      (auth.hash_password(body.new_password), user["id"]))
         conn.execute("DELETE FROM sessions WHERE employee_id = ?", (user["id"],))
         conn.execute("INSERT INTO sessions(token, employee_id, created_at) VALUES (?, ?, ?)",
@@ -806,7 +890,7 @@ def issue_password(req_id: int, admin=Depends(require_admin), conn=Depends(get_c
         raise HTTPException(status_code=400, detail="Không xác định được nhân viên")
     new_pw = gen_temp_password()
     with conn:
-        conn.execute("UPDATE employees SET password_hash = ? WHERE id = ?",
+        conn.execute("UPDATE employees SET password_hash = ?, must_change_password = 1 WHERE id = ?",
                      (auth.hash_password(new_pw), row["employee_id"]))
         conn.execute("DELETE FROM sessions WHERE employee_id = ?", (row["employee_id"],))
         conn.execute(
@@ -892,201 +976,304 @@ def admin_timesheet_files(employee_id: int, admin=Depends(require_admin), conn=D
     emp = conn.execute("SELECT * FROM employees WHERE id = ?", (employee_id,)).fetchone()
     if not emp:
         raise HTTPException(status_code=404, detail="Không thấy nhân viên")
-    safe = export.safe_person_dir(emp["name"])
-    person_dir = os.path.join(export.TIMESHEET_DIR, safe)
     files = []
-    if os.path.isdir(person_dir):
-        for name in sorted(os.listdir(person_dir), reverse=True):
-            if not name.endswith(".xlsx"):
-                continue
-            full = os.path.join(person_dir, name)
-            st = os.stat(full)
-            files.append({
-                "name": name,
-                "size": st.st_size,
-                "mtime": datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds"),
-                "url": f"/api/admin/timesheet-file?employee_id={employee_id}&name={name}",
-                "is_master": bool(emp["timesheet_file"]) and os.path.abspath(emp["timesheet_file"]) == os.path.abspath(full),
-            })
-    return {
-        "employee": emp["name"],
-        "folder": person_dir,
-        "exists": os.path.isdir(person_dir),
-        "master": emp["timesheet_file"] if "timesheet_file" in emp.keys() else None,
-        "files": files,
-    }
+    for record in storage.files_for(conn, employee_id):
+        full = os.path.join(export.TIMESHEET_DIR, record["filename"])
+        if not os.path.isfile(full):
+            continue
+        st = os.stat(full)
+        from urllib.parse import urlencode
+        files.append({"name": record["filename"], "size": st.st_size,
+                      "mtime": datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds"),
+                      "url": "/api/admin/timesheet-file?" + urlencode({"employee_id": employee_id, "name": record["filename"]}),
+                      "is_master": bool(emp["timesheet_file"]) and os.path.abspath(emp["timesheet_file"]) == os.path.abspath(full)})
+    return {"employee": emp["name"], "folder": export.TIMESHEET_DIR,
+            "exists": os.path.isdir(export.TIMESHEET_DIR), "master": emp["timesheet_file"], "files": files}
+
+
+def _owned_timesheet(conn, employee_id, name):
+    try:
+        return storage.owned_path(conn, employee_id, name)
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.get("/api/admin/timesheet-file")
 def admin_timesheet_file(employee_id: int, name: str, admin=Depends(require_admin), conn=Depends(get_conn)):
-    emp = conn.execute("SELECT * FROM employees WHERE id = ?", (employee_id,)).fetchone()
-    if not emp:
-        raise HTTPException(status_code=404, detail="Không thấy nhân viên")
-    safe_name = os.path.basename(name)
-    path = os.path.join(export.TIMESHEET_DIR, export.safe_person_dir(emp["name"]), safe_name)
-    if not os.path.isfile(path):
-        raise HTTPException(status_code=404, detail="Không thấy file timesheet")
-    return FileResponse(
-        path,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        filename=safe_name,
+    path = _owned_timesheet(conn, employee_id, name)
+    return FileResponse(path, filename=os.path.basename(path))
+
+
+def _employee_for_workbook(conn, weeks):
+    employees = conn.execute("SELECT * FROM employees WHERE is_admin = 0 AND active = 1").fetchall()
+    inactive = conn.execute("SELECT * FROM employees WHERE is_admin = 0 AND active = 0").fetchall()
+    selected = set()
+    for week in weeks:
+        name = storage.name_key(week.get("employee_name"))
+        if name:
+            matches = [emp for emp in employees if storage.name_key(emp["name"]) == name]
+        else:
+            try:
+                code = int(week.get("pers_no"))
+            except (ValueError, TypeError):
+                code = None
+            matches = [emp for emp in employees if emp["pers_no"] == code]
+        if len(matches) != 1:
+            # có thể người này tồn tại nhưng đang bị khoá (nghỉ việc) -> báo rõ thay vì "không xác định được"
+            if not matches:
+                if name:
+                    off = [emp for emp in inactive if storage.name_key(emp["name"]) == name]
+                else:
+                    try:
+                        code = int(week.get("pers_no"))
+                    except (ValueError, TypeError):
+                        code = None
+                    off = [emp for emp in inactive if emp["pers_no"] == code]
+                if len(off) == 1:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Nhân viên {off[0]['name']} (Pers.no {off[0]['pers_no']}) đang ở trạng thái nghỉ/khoá. "
+                               "Hãy mở lại nhân viên này trong tab Nhân viên rồi upload lại.",
+                    )
+            raise HTTPException(status_code=400, detail=f"Sheet {week['sheet']}: không xác định được nhân viên từ tên D1 / mã O1. Hãy upload trong danh sách file của đúng nhân viên.")
+        selected.add(matches[0]["id"])
+    if len(selected) != 1:
+        raise HTTPException(status_code=400, detail="Các sheet trong file thuộc nhiều nhân viên khác nhau")
+    return next(iter(selected))
+
+
+def replace_file(src: str, dst: str, tries: int = 6, delay: float = 0.4) -> None:
+    """Thay file an toàn trên Windows: file đích có thể đang bị Excel/OneDrive khoá."""
+    last = None
+    for _ in range(tries):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError as exc:  # WinError 32: file đang được mở
+            last = exc
+            time.sleep(delay)
+    raise HTTPException(
+        status_code=409,
+        detail="Không ghi được file Excel vì file đang được mở (thường là đang mở trong Excel) "
+               "hoặc bị OneDrive/chương trình diệt virus khoá. Hãy đóng file đó rồi bấm Lưu lại. "
+               f"Chi tiết: {last}",
     )
 
 
 @app.post("/api/admin/timesheet-upload")
-def admin_timesheet_upload(
-    employee_id: int,
-    file: UploadFile = File(...),
-    admin=Depends(require_admin),
-    conn=Depends(get_conn),
-):
-    """Admin up file timesheet từ máy mình lên: đọc dữ liệu trong file rồi ghi vào hệ thống
-    và tạo lại file chuẩn của tuần đó cho nhân viên."""
-    emp = conn.execute("SELECT * FROM employees WHERE id = ?", (employee_id,)).fetchone()
-    if not emp:
-        raise HTTPException(status_code=404, detail="Không thấy nhân viên")
-    if not file.filename.lower().endswith((".xlsx", ".xlsm")):
-        raise HTTPException(status_code=400, detail="Chỉ nhận file Excel .xlsx")
-
-    tmp_dir = os.path.join(export.TIMESHEET_DIR, "_uploads")
-    os.makedirs(tmp_dir, exist_ok=True)
-    tmp_path = os.path.join(tmp_dir, f"{emp['id']}-{int(datetime.now().timestamp())}.xlsx")
-    with open(tmp_path, "wb") as f:
-        f.write(file.file.read())
-
+def admin_timesheet_upload(employee_id: int | None = None, file: UploadFile = File(...),
+                           admin=Depends(require_admin), conn=Depends(get_conn)):
+    """Nhập toàn bộ tuần có dữ liệu, lưu file trực tiếp trong kho chung."""
     try:
-        week_start, rows = export.read_week_sheet(tmp_path)
-    except Exception as exc:
-        try:
-            os.remove(tmp_path)
-        except OSError:
-            pass
-        raise HTTPException(status_code=400, detail=f"Không đọc được file: {exc}") from exc
+        filename = storage.safe_filename(file.filename)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    if not rows:
+    size = getattr(file, "size", None)
+    if size and size > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File lớn hơn giới hạn {MAX_UPLOAD_BYTES // (1024 * 1024)}MB. "
+                   "Hãy tách bớt tuần rồi upload lại.",
+        )
+
+    # File tạm không nằm trong kho Excel của người dùng.
+    tmp_dir = os.path.join(BASE_DIR, "data", "_uploads")
+    os.makedirs(tmp_dir, exist_ok=True)
+    tmp_path = os.path.join(tmp_dir, secrets.token_hex(12) + os.path.splitext(filename)[1])
+    try:
+        written = 0
+        with open(tmp_path, "wb") as out:
+            while True:
+                chunk = file.file.read(1024 * 1024)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > MAX_UPLOAD_BYTES:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"File lớn hơn giới hạn {MAX_UPLOAD_BYTES // (1024 * 1024)}MB. "
+                               "Hãy tách bớt tuần rồi upload lại.",
+                    )
+                out.write(chunk)
         try:
+            weeks = export.read_timesheet(tmp_path)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Không đọc được file: {exc}") from exc
+        if not weeks:
+            raise HTTPException(status_code=400, detail="File không có dòng Project nào. Không thay đổi dữ liệu đã có.")
+        if employee_id is None:
+            employee_id = _employee_for_workbook(conn, weeks)
+        emp = conn.execute("SELECT * FROM employees WHERE id = ? AND is_admin = 0", (employee_id,)).fetchone()
+        if not emp:
+            raise HTTPException(status_code=404, detail="Không thấy nhân viên")
+        filename = storage.target_name(conn, emp["id"], filename)
+        os.makedirs(export.TIMESHEET_DIR, exist_ok=True)
+        master_path = os.path.join(export.TIMESHEET_DIR, filename)
+        backup = tmp_path + ".backup"
+        had_file = os.path.isfile(master_path)
+        installed = False
+        try:
+            with conn:
+                conn.execute("UPDATE employees SET timesheet_file = ? WHERE id = ?", (master_path, emp["id"]))
+                for week in weeks:
+                    start = week["start"]
+                    conn.execute("DELETE FROM entries WHERE employee_id = ? AND work_date BETWEEN ? AND ?",
+                                 (emp["id"], start.isoformat(), (start + timedelta(days=6)).isoformat()))
+                    for row in week["rows"]:
+                        proj = row["project_number"]
+                        conn.execute("INSERT OR IGNORE INTO projects(project_number) VALUES (?)", (proj,))
+                        if row["panel_number"]:
+                            conn.execute("INSERT OR IGNORE INTO panels(project_number, panel_number) VALUES (?, ?)", (proj, row["panel_number"]))
+                        now = datetime.now().isoformat(timespec="seconds")
+                        conn.execute(
+                            """INSERT INTO entries(employee_id, work_date, project_number, panel_number, description,
+                                   normal_hours, travel_hours, ot_a, ot_b, cost_place, status, approved_at, created_at)
+                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'approved', ?, ?)""",
+                            (emp["id"], row["work_date"], proj, row["panel_number"], row["description"],
+                             row["normal_hours"], row["travel_hours"], row["ot_a"], row["ot_b"],
+                             row["cost_place"] or emp["cost_place_code"], now, now))
+                storage.register(conn, emp["id"], filename, weeks)
+                if had_file:
+                    replace_file(master_path, backup)
+                replace_file(tmp_path, master_path)
+                installed = True
+        except Exception:
+            if installed:
+                try:
+                    os.remove(master_path)
+                except OSError:
+                    pass
+            if os.path.isfile(backup):
+                try:
+                    replace_file(backup, master_path)
+                except Exception:
+                    pass
+            raise
+        finally:
+            if os.path.isfile(backup):
+                try:
+                    os.remove(backup)
+                except OSError:
+                    pass
+        warnings = []
+        for week in weeks:
+            try:
+                _sync_employee_week(conn, emp["id"], week["start"], exclude_path=master_path)
+            except Exception as exc:
+                warnings.append(f"Tuần {week['start']}: dữ liệu đã nhập nhưng chưa ghi được file khác: {exc}")
+        return {"ok": True, "employee": emp["name"], "employee_id": emp["id"],
+                "week_start": weeks[0]["start"].isoformat(), "weeks_imported": len(weeks),
+                "weeks": [{"sheet": w["sheet"], "week_start": w["start"].isoformat(), "imported": len(w["rows"])} for w in weeks],
+                "imported": sum(len(w["rows"]) for w in weeks), "file_path": master_path, "warnings": warnings}
+    finally:
+        if os.path.isfile(tmp_path):
             os.remove(tmp_path)
-        except OSError:
-            pass
+
+
+@app.post("/api/admin/timesheet-upload-batch")
+def admin_timesheet_upload_batch(files: list[UploadFile] | None = File(None),
+                                 file: list[UploadFile] | None = File(None),
+                                 employee_id: int | None = None,
+                                 admin=Depends(require_admin), conn=Depends(get_conn)):
+    def _as_list(value):
+        if value is None:
+            return []
+        if isinstance(value, (list, tuple)):
+            return [v for v in value if v is not None]
+        if hasattr(value, "filename") or hasattr(value, "read"):
+            return [value]
+        return []
+
+    # nhận cả field "files" (nhiều file) và "file" (một file) để không phụ thuộc giao diện
+    incoming = _as_list(files) + _as_list(file)
+    if not incoming:
         raise HTTPException(
             status_code=400,
-            detail="File này không có dòng giờ nào nên Mao không ghi đè dữ liệu. "
-                   "Hãy chọn file timesheet đã có giờ.",
+            detail="Không nhận được file Excel nào từ trình duyệt. Hãy chọn file rồi bấm nhập lại "
+                   "(nếu vẫn lỗi, thử đổi tên file bỏ dấu tiếng Việt và khoảng trắng).",
         )
+    results = []
+    for f in incoming:
+        try:
+            result = admin_timesheet_upload(employee_id=employee_id, file=f, admin=admin, conn=conn)
+            results.append({"filename": f.filename, **result})
+        except HTTPException as exc:
+            detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+            results.append({"filename": f.filename, "ok": False, "error": detail})
+        except Exception as exc:
+            results.append({"filename": f.filename, "ok": False, "error": f"Không nhập được file: {exc}"})
+    return {"results": results, "succeeded": sum(1 for r in results if r.get("ok")), "total": len(results)}
 
-    # lưu file admin up lên làm file chính thức của nhân viên này
-    person_dir = os.path.join(export.TIMESHEET_DIR, export.safe_person_dir(emp["name"]))
-    os.makedirs(person_dir, exist_ok=True)
-    safe_file_name = os.path.basename(file.filename or "timesheet.xlsx")
-    master_path = os.path.join(person_dir, safe_file_name)
-    os.replace(tmp_path, master_path)
-    with conn:
-        conn.execute("UPDATE employees SET timesheet_file = ? WHERE id = ?", (master_path, emp["id"]))
 
-    week_end = week_start + timedelta(days=6)
-    inserted = 0
-    with conn:
-        # thay thế toàn bộ dữ liệu tuần đó của nhân viên bằng dữ liệu trong file
-        conn.execute(
-            "DELETE FROM entries WHERE employee_id = ? AND work_date BETWEEN ? AND ?",
-            (emp["id"], week_start.isoformat(), week_end.isoformat()),
-        )
-        for row in rows:
-            proj = row["project_number"]
-            conn.execute("INSERT OR IGNORE INTO projects(project_number) VALUES (?)", (proj,))
-            conn.execute(
-                """INSERT INTO entries(employee_id, work_date, project_number, panel_number, description,
-                       normal_hours, travel_hours, ot_a, ot_b, cost_place, status, approved_at, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'approved', ?, ?)""",
-                (emp["id"], row["work_date"], proj, row["panel_number"], row["description"],
-                 row["normal_hours"], row["travel_hours"], row["ot_a"], row["ot_b"],
-                 row["cost_place"] or emp["cost_place_code"],
-                 datetime.now().isoformat(timespec="seconds"),
-                 datetime.now().isoformat(timespec="seconds")),
-            )
-            inserted += 1
-
-    path = _sync_employee_week(conn, emp["id"], week_start)
-    return {
-        "ok": True,
-        "employee": emp["name"],
-        "week_start": week_start.isoformat(),
-        "imported": inserted,
-        "file_path": path,
-    }
+@app.post("/api/admin/timesheet-resync")
+def admin_timesheet_resync(admin=Depends(require_admin), conn=Depends(get_conn)):
+    """Đọc lại mọi file đã lưu, kể cả file chuyển từ cấu trúc thư mục bản cũ."""
+    import shutil
+    import tempfile
+    results = []
+    records = sorted(storage.files_for(conn), key=lambda record: (record["updated_at"], record["id"]))
+    # Chụp các file nguồn trước: đồng bộ file đầu không làm đổi đầu vào file sau.
+    tmp_root = os.path.join(BASE_DIR, "data", "_uploads")
+    os.makedirs(tmp_root, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=tmp_root) as snapshot_dir:
+        snapshots = []
+        for record in records:
+            try:
+                source = os.path.join(export.TIMESHEET_DIR, record["filename"])
+                snapshot = os.path.join(snapshot_dir, record["filename"])
+                shutil.copyfile(source, snapshot)
+                snapshots.append((record, snapshot))
+            except OSError as exc:
+                results.append({"filename": record["filename"], "ok": False, "error": str(exc)})
+        for record, snapshot in snapshots:
+            try:
+                with open(snapshot, "rb") as source:
+                    upload = UploadFile(filename=record["filename"], file=source)
+                    result = admin_timesheet_upload(employee_id=record["employee_id"], file=upload, admin=admin, conn=conn)
+                results.append({"filename": record["filename"], **result})
+            except HTTPException as exc:
+                results.append({"filename": record["filename"], "ok": False, "error": str(exc.detail)})
+            except Exception as exc:
+                results.append({"filename": record["filename"], "ok": False, "error": str(exc)})
+    return {"results": results, "succeeded": sum(r["ok"] for r in results), "total": len(records)}
 
 
 @app.post("/api/admin/timesheet-use")
 def admin_timesheet_use(employee_id: int, name: str, admin=Depends(require_admin), conn=Depends(get_conn)):
-    """Chọn file có sẵn làm file chính thức để hệ thống ghi dữ liệu vào."""
-    emp = conn.execute("SELECT * FROM employees WHERE id = ?", (employee_id,)).fetchone()
-    if not emp:
-        raise HTTPException(status_code=404, detail="Không thấy nhân viên")
-    path = os.path.join(export.TIMESHEET_DIR, export.safe_person_dir(emp["name"]), os.path.basename(name))
-    if not os.path.isfile(path):
-        raise HTTPException(status_code=404, detail="Không thấy file timesheet")
+    path = _owned_timesheet(conn, employee_id, name)
     with conn:
-        conn.execute("UPDATE employees SET timesheet_file = ? WHERE id = ?", (path, emp["id"]))
+        conn.execute("UPDATE employees SET timesheet_file = ? WHERE id = ?", (path, employee_id))
     return {"ok": True, "master": path}
 
 
 @app.delete("/api/admin/timesheet-file")
 def admin_timesheet_delete(employee_id: int, name: str, admin=Depends(require_admin), conn=Depends(get_conn)):
-    emp = conn.execute("SELECT * FROM employees WHERE id = ?", (employee_id,)).fetchone()
-    if not emp:
-        raise HTTPException(status_code=404, detail="Không thấy nhân viên")
-    safe_name = os.path.basename(name)
-    path = os.path.join(export.TIMESHEET_DIR, export.safe_person_dir(emp["name"]), safe_name)
-    if not os.path.isfile(path):
-        raise HTTPException(status_code=404, detail="Không thấy file timesheet")
+    path = _owned_timesheet(conn, employee_id, name)
     os.remove(path)
-    if emp["timesheet_file"] and os.path.abspath(emp["timesheet_file"]) == os.path.abspath(path):
-        with conn:
-            conn.execute("UPDATE employees SET timesheet_file = NULL WHERE id = ?", (emp["id"],))
-    return {"ok": True, "deleted": safe_name}
+    with conn:
+        conn.execute("UPDATE employees SET timesheet_file = NULL WHERE id = ? AND timesheet_file = ?", (employee_id, path))
+        conn.execute("DELETE FROM timesheet_file_weeks WHERE file_id IN (SELECT id FROM timesheet_files WHERE filename = ? AND employee_id = ?)", (os.path.basename(path), employee_id))
+        conn.execute("DELETE FROM timesheet_files WHERE filename = ? AND employee_id = ?", (os.path.basename(path), employee_id))
+    return {"ok": True, "deleted": os.path.basename(path)}
 
 
 @app.get("/api/admin/timesheet-zip")
 def admin_timesheet_zip(employee_id: int | None = None, admin=Depends(require_admin), conn=Depends(get_conn)):
-    """Tải về một gói .zip toàn bộ file timesheet (của 1 người hoặc tất cả) để đồng bộ về máy admin."""
-    import io as _io
+    import io
     import zipfile
-
-    buf = _io.BytesIO()
+    buf = io.BytesIO()
     added = 0
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        if employee_id:
-            emp = conn.execute("SELECT * FROM employees WHERE id = ?", (employee_id,)).fetchone()
-            if not emp:
-                raise HTTPException(status_code=404, detail="Không thấy nhân viên")
-            person = export.safe_person_dir(emp["name"])
-            folder = os.path.join(export.TIMESHEET_DIR, person)
-            if os.path.isdir(folder):
-                for name in sorted(os.listdir(folder)):
-                    if name.endswith(".xlsx"):
-                        zf.write(os.path.join(folder, name), arcname=f"{person}/{name}")
-                        added += 1
-            zip_name = f"Timesheet_{person}.zip"
-        else:
-            if os.path.isdir(export.TIMESHEET_DIR):
-                for person in sorted(os.listdir(export.TIMESHEET_DIR)):
-                    folder = os.path.join(export.TIMESHEET_DIR, person)
-                    if person.startswith("_") or not os.path.isdir(folder):
-                        continue
-                    for name in sorted(os.listdir(folder)):
-                        if name.endswith(".xlsx"):
-                            zf.write(os.path.join(folder, name), arcname=f"{person}/{name}")
-                            added += 1
-            zip_name = "Timesheet_VDL_tat_ca.zip"
-
-    if added == 0:
+        for record in storage.files_for(conn, employee_id):
+            path = os.path.join(export.TIMESHEET_DIR, record["filename"])
+            if os.path.isfile(path):
+                zf.write(path, arcname=record["filename"])
+                added += 1
+    if not added:
         raise HTTPException(status_code=404, detail="Chưa có file timesheet nào để tải")
-    buf.seek(0)
-    return Response(
-        content=buf.getvalue(),
-        media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{zip_name}"'},
-    )
+    return Response(content=buf.getvalue(), media_type="application/zip",
+                    headers={"Content-Disposition": 'attachment; filename="Timesheets.zip"'})
 
 
 @app.get("/api/my-timesheet")
@@ -1202,6 +1389,28 @@ def _week_hours(conn, employee_id: int, start: date) -> float:
     ).fetchone()["s"] or 0.0
 
 
+def _backup_db() -> str | None:
+    """Sao lưu app.db mỗi ngày một bản, giữ BACKUP_KEEP bản mới nhất."""
+    import shutil
+    if not os.path.isfile(db.DB_PATH):
+        return None
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    target = os.path.join(BACKUP_DIR, f"app-{date.today().isoformat()}.db")
+    try:
+        if not os.path.isfile(target):
+            shutil.copy2(db.DB_PATH, target)
+        backups = sorted(f for f in os.listdir(BACKUP_DIR) if f.startswith("app-") and f.endswith(".db"))
+        for old in backups[:-BACKUP_KEEP]:
+            try:
+                os.remove(os.path.join(BACKUP_DIR, old))
+            except OSError:
+                pass
+    except OSError as exc:
+        print("Không sao lưu được database:", exc)
+        return None
+    return target
+
+
 def _weekly_report_scheduler():
     """07:00 Thứ Hai: chốt báo cáo tuần và báo cho admin.
     07:00 Thứ Bảy: báo cho từng nhân viên đã làm bao nhiêu giờ, còn thiếu bao nhiêu.
@@ -1210,6 +1419,7 @@ def _weekly_report_scheduler():
     while True:
         try:
             conn = db.connect()
+            _backup_db()
             now = datetime.now()
             prev = _previous_week_start()
             this_week = export.week_start(date.today())
@@ -1319,6 +1529,12 @@ def _enqueue_email(conn, subject: str, body: str, to_addr: str | None = None) ->
     if not to_addr:
         return
     with conn:
+        # cùng người nhận + cùng tiêu đề thì chỉ xếp hàng một lần (tránh gửi lặp mỗi 10 phút)
+        dup = conn.execute(
+            "SELECT 1 FROM email_queue WHERE to_addr = ? AND subject = ? LIMIT 1", (to_addr, subject)
+        ).fetchone()
+        if dup:
+            return
         conn.execute(
             "INSERT INTO email_queue(to_addr, subject, body, created_at) VALUES (?, ?, ?, ?)",
             (to_addr, subject, body, datetime.now().isoformat(timespec="seconds")),

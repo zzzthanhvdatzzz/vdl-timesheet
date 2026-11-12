@@ -1,6 +1,10 @@
 """Xuất timesheet tuần ra file Excel theo đúng mẫu FORM TIMESHEET 2026 VDL VN.xlsx."""
 import io
+import math
 import os
+import re
+import tempfile
+import time
 import unicodedata
 from datetime import date, datetime, timedelta
 
@@ -10,6 +14,22 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEMPLATE_DIR = os.path.join(BASE_DIR, "data", "source")
 TEMPLATE = os.path.join(TEMPLATE_DIR, "FORM TIMESHEET 2026 VDL VN.xlsx")
 TIMESHEET_DIR = os.path.join(BASE_DIR, "data", "timesheets")
+
+
+def _replace_retry(src: str, dst: str, tries: int = 6, delay: float = 0.4) -> None:
+    """Thay file an toàn: trên Windows file đích có thể đang mở trong Excel (WinError 32)."""
+    last = None
+    for _ in range(tries):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError as exc:
+            last = exc
+            time.sleep(delay)
+    raise RuntimeError(
+        "File Excel đang được mở (thường là đang mở trong Excel) nên không ghi được. "
+        "Hãy đóng file đó rồi bấm Lưu lại. Chi tiết: " + str(last)
+    )
 
 # (dòng bắt đầu, số dòng trống) cho từng thứ, khớp template: CN 4-6, T2 7-16, T3 17-26...
 BLOCKS = {
@@ -118,50 +138,61 @@ def build_week_file(employee: dict, entries: list, start: date) -> tuple[bytes, 
     return buf.getvalue(), filename, skipped
 
 
-def write_into_workbook(path: str, employee: dict, entries: list, start: date) -> str:
+def write_into_workbook(path: str, employee: dict, entries: list, start: date, sheet_name: str | None = None) -> str:
     """Ghi dữ liệu tuần vào chính file .xlsx mà admin đã up lên (giữ nguyên các sheet khác)."""
-    wb = openpyxl.load_workbook(path)
-    year, week_no = week_number(start)
-    sheet_name = str(week_no)
-    if sheet_name not in wb.sheetnames:
-        # file up lên không có sheet của tuần này -> tạo file riêng từ mẫu
-        return write_week_file(employee, entries, start)
-    _fill_week_sheet(wb[sheet_name], employee, entries, start)
-    wb.active = wb.sheetnames.index(sheet_name)
-    wb.save(path)
-    return path
+    wb = openpyxl.load_workbook(path, keep_vba=path.lower().endswith(".xlsm"))
+    tmp_path = None
+    try:
+        year, week_no = week_number(start)
+        sheet_name = sheet_name or str(week_no)
+        if sheet_name not in wb.sheetnames:
+            raise ValueError(f"File thiếu sheet {sheet_name}; hãy nhập lại file để cập nhật liên kết tuần")
+        _fill_week_sheet(wb[sheet_name], employee, entries, start)
+        wb.active = wb.sheetnames.index(sheet_name)
+        with tempfile.NamedTemporaryFile(dir=os.path.dirname(path), suffix=os.path.splitext(path)[1], delete=False) as tmp:
+            tmp_path = tmp.name
+        wb.save(tmp_path)
+        wb.close()
+        _replace_retry(tmp_path, path)
+        return path
+    finally:
+        wb.close()
+        if tmp_path and os.path.isfile(tmp_path):
+            os.remove(tmp_path)
 
 
-def read_week_sheet(path: str):
-    """Đọc file timesheet tuần do admin tải lên, trả về (ngày bắt đầu tuần, danh sách dòng giờ)."""
-    wb = openpyxl.load_workbook(path, data_only=True)
-    # chọn sheet tuần: sheet không phải các sheet phụ
-    aux = {"Name list", "Cost centre", "Panel list1", "Panel list 2018", "Panel list",
-           "How to fill timesheet", "general fill"}
-    candidates = [n for n in wb.sheetnames if n not in aux and str(n).isdigit()]
-    if not candidates:
-        candidates = [wb.sheetnames[0]]
+def _header_value(values, formulas, sheet, coordinate, seen=None):
+    """Đọc các liên kết ngày/tên của form mẫu khi Excel chưa lưu giá trị cache."""
+    value = values[sheet][coordinate].value
+    if value is not None:
+        return value
+    raw = formulas[sheet][coordinate].value
+    if not isinstance(raw, str) or not raw.startswith('='):
+        return raw
+    seen = set() if seen is None else seen
+    key = (sheet, coordinate)
+    if key in seen:
+        raise ValueError(f'Vòng lặp công thức tại {sheet}!{coordinate}')
+    seen = seen | {key}
+    match = re.fullmatch(r"=(?:'([^']+)'|([A-Za-z0-9_ ]+))!([A-Z]+[0-9]+)(?:([+-])([0-9]+))?", raw)
+    if match:
+        ref_sheet = match[1] or match[2]
+        if ref_sheet not in formulas.sheetnames:
+            return None
+        result = _header_value(values, formulas, ref_sheet, match[3], seen)
+        if match[4] and result is not None:
+            offset = int(match[5]) * (1 if match[4] == '+' else -1)
+            result += timedelta(days=offset) if isinstance(result, (date, datetime)) else offset
+        return result
+    if coordinate == 'D1' and raw.upper().startswith('=VLOOKUP(O1,') and 'Name list' in formulas.sheetnames:
+        code = _header_value(values, formulas, sheet, 'O1', seen)
+        for row in formulas['Name list'].iter_rows(values_only=True):
+            if row[0] == code:
+                return row[1]
+    return None
 
-    def _has_data(sheet):
-        n = 0
-        for wd, (block_start, capacity) in BLOCKS.items():
-            for i in range(capacity):
-                if sheet.cell(block_start + i, COL_PROJECT).value:
-                    n += 1
-        return n
 
-    # ưu tiên sheet có nhiều dòng giờ nhất; nếu tất cả trống thì lấy tuần hiện tại
-    best, best_n = None, -1
-    for name in candidates:
-        n = _has_data(wb[name])
-        if n > best_n:
-            best, best_n = name, n
-    if best_n <= 0:
-        cur_week = date.today().isocalendar()[1]
-        best = str(cur_week) if str(cur_week) in wb.sheetnames else candidates[0]
-    ws = wb[best]
-
-    start = ws["F1"].value
+def _read_week_rows(ws, formulas, start):
     if isinstance(start, datetime):
         start = start.date()
     elif isinstance(start, str):
@@ -169,6 +200,7 @@ def read_week_sheet(path: str):
     if not isinstance(start, date):
         raise ValueError("Không đọc được ngày bắt đầu tuần ở ô F1")
 
+    start = week_start(start)
     rows = []
     for wd, (block_start, capacity) in BLOCKS.items():
         for i in range(capacity):
@@ -176,6 +208,13 @@ def read_week_sheet(path: str):
             proj = ws.cell(r, COL_PROJECT).value
             if not proj:
                 continue
+            for col in (COL_NORMAL, COL_TRAVEL, COL_OTA, COL_OTB):
+                cell = ws.cell(r, col)
+                if cell.value is None and formulas.cell(r, col).data_type == "f":
+                    raise ValueError(f"Ô {cell.coordinate} chưa có kết quả công thức. Mở file bằng Excel, tính lại và lưu trước khi upload")
+                hours = float(cell.value or 0)
+                if not math.isfinite(hours) or hours < 0 or hours > 24:
+                    raise ValueError(f"Ô {cell.coordinate}: giờ phải là số từ 0 đến 24")
             work_date = start + timedelta(days=(wd + 1) % 7)
             rows.append({
                 "work_date": work_date.isoformat(),
@@ -191,7 +230,44 @@ def read_week_sheet(path: str):
                 "cost_place": (str(ws.cell(r, COL_COSTPLACE).value).strip()
                                if ws.cell(r, COL_COSTPLACE).value else None),
             })
-    return week_start(start), rows
+    return start, rows
+
+
+def read_timesheet(path: str):
+    """Đọc tất cả sheet tuần có Project; bỏ qua sheet phụ và tuần trống.
+
+    Đọc và kiểm tra toàn bộ file trước khi bên gọi thay đổi database.
+    """
+    wb = openpyxl.load_workbook(path, data_only=True)
+    formulas = None
+    try:
+        formulas = openpyxl.load_workbook(path, data_only=False)
+        aux = {"Name list", "Cost centre", "Panel list1", "Panel list 2018", "Panel list",
+               "How to fill timesheet", "general fill"}
+        aux = {n.casefold() for n in aux}
+        candidates = [n for n in wb.sheetnames if n.strip().casefold() not in aux]
+        weeks = []
+        seen = set()
+        for name in candidates:
+            ws = wb[name]
+            if not any(ws.cell(r + i, COL_PROJECT).value
+                       for r, capacity in BLOCKS.values() for i in range(capacity)):
+                continue
+            try:
+                start, rows = _read_week_rows(ws, formulas[name], _header_value(wb, formulas, name, "F1"))
+                if start in seen:
+                    raise ValueError("Trùng tuần với một sheet khác trong file")
+            except (ValueError, TypeError, OverflowError) as exc:
+                raise ValueError(f"Sheet {name}: {exc}") from exc
+            seen.add(start)
+            weeks.append({"sheet": name, "start": start, "rows": rows,
+                          "employee_name": _header_value(wb, formulas, name, "D1"),
+                          "pers_no": _header_value(wb, formulas, name, "O1")})
+        return sorted(weeks, key=lambda week: week["start"])
+    finally:
+        wb.close()
+        if formulas is not None:
+            formulas.close()
 
 
 def safe_person_dir(name: str) -> str:
@@ -206,9 +282,8 @@ def write_week_file(employee: dict, entries: list, start: date) -> str:
     content, filename, _skipped = build_week_file(employee, entries, start)
     who = safe_person_dir(employee["name"])
     week_part = filename[len("Timesheet_"):].split("_")[0]          # 2026-W43
-    person_dir = os.path.join(TIMESHEET_DIR, who)
-    os.makedirs(person_dir, exist_ok=True)
-    path = os.path.join(person_dir, f"Timesheet_{week_part}_{who}.xlsx")
+    os.makedirs(TIMESHEET_DIR, exist_ok=True)
+    path = os.path.join(TIMESHEET_DIR, f"Timesheet_{week_part}_NV{employee['pers_no']}_{who}.xlsx")
     with open(path, "wb") as f:
         f.write(content)
     return path

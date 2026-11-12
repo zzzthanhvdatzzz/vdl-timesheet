@@ -31,10 +31,22 @@
 
   <section class="section active" id="sec-emp">
     <div class="card">
+      <h2>Nhập nhiều file timesheet</h2>
+      <p class="hint">Chọn tất cả file Excel cần đồng bộ. Nhận diện nhân viên theo tên ở D1 hoặc mã ở O1. Mỗi file nhập tất cả tuần có dữ liệu và lưu trực tiếp trong data/timesheets. Nếu nhiều file có cùng nhân viên và tuần, file nhập sau sẽ thay thế tuần đó và cập nhật các file đã nhập trước.</p>
+      <input id="bulkFiles" type="file" accept=".xlsx,.xlsm" multiple>
+      <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap">
+        <button id="bulkUpload">Nhập tất cả file đã chọn</button>
+        <button id="resyncFiles" class="ghost">Đồng bộ lại tất cả file đã lưu</button>
+        <a class="small ghost" href="/api/admin/timesheet-zip">Tải tất cả timesheet (.zip)</a>
+      </div>
+      <div id="bulkResults" role="status" style="white-space:pre-wrap;margin-top:10px"></div>
+    </div>
+    <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
         <h2 style="margin:0">Gán cost place (chỉ admin)</h2>
         <button class="small" id="addEmpBtn">+ Thêm nhân viên</button>
       </div>
+      <label style="display:block;margin-bottom:10px;text-transform:none"><input id="showInactive" type="checkbox" style="width:auto"> Hiện cả tài khoản đã khóa ngoài danh sách xưởng</label>
       <p class="hint" style="margin-top:-6px">Đổi cost place ở đây là đổi luôn mã in trên timesheet của nhân viên đó ở các dòng mới.</p>
       <div style="overflow-x:auto">
         <table>
@@ -84,7 +96,12 @@
       <div class="msg" id="exMsg"></div>
     </div>
     <div class="card">
-      <h2>Giờ đã chấm (7 ngày gần nhất)</h2>
+      <h2>Giờ đã chấm</h2>
+      <div class="grid cols-4" style="margin-bottom:12px">
+        <div><label for="entryStart">Từ ngày</label><input id="entryStart" type="date"></div>
+        <div><label for="entryEnd">Đến ngày</label><input id="entryEnd" type="date"></div>
+      </div>
+      <p class="hint">Hiển thị tối đa 500 dòng mới nhất trong khoảng ngày đã chọn. Thu hẹp khoảng ngày để xem chi tiết.</p>
       <input id="entrySearch" type="text" placeholder="Tìm theo tên hoặc project…" style="margin-bottom:12px">
       <div style="overflow-x:auto">
         <table>
@@ -142,18 +159,18 @@
       </div>
       <div class="hint" id="fmFolder" style="margin-bottom:12px;word-break:break-all"></div>
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
-        <input id="fmFile" type="file" accept=".xlsx,.xlsm" style="width:auto;padding:7px 8px">
-        <button id="fmUpload" class="small">Up file lên hệ thống</button>
+        <input id="fmFile" type="file" accept=".xlsx,.xlsm" multiple style="width:auto;padding:7px 8px">
+        <button id="fmUpload" class="small">Nhập các file đã chọn</button>
         <a id="fmZip" class="small ghost" style="text-decoration:none;padding:6px 10px;border-radius:7px;background:#eaeef4;color:#1d2433" href="#">Tải tất cả (.zip)</a>
       </div>
-      <p class="hint" style="margin-top:-6px">Up file xong, dữ liệu trong file được ghi vào hệ thống và file chuẩn của nhân viên được tạo lại. Sau đó nhân viên sửa giờ trên web thì file này lại được cập nhật.</p>
+      <p class="hint" style="margin-top:-6px">Nhập tất cả các tuần có dữ liệu trong file. Mỗi tuần được nhập sẽ thay thế dữ liệu tuần đó của nhân viên đang chọn; tuần trống và tuần ngoài file được giữ nguyên. Sau đó nhân viên sửa giờ trên web thì file này lại được cập nhật.</p>
       <div style="overflow-x:auto">
         <table>
           <thead><tr><th>Tên file</th><th class="num">Dung lượng</th><th>Cập nhật lúc</th><th></th></tr></thead>
           <tbody id="fmRows"><tr><td colspan="4" class="hint">Đang tải…</td></tr></tbody>
         </table>
       </div>
-      <div class="msg" id="fmMsg"></div>
+      <div class="msg" id="fmMsg" style="white-space:pre-wrap"></div>
     </div>
   </div>
   <div id="weekModal" style="display:none;position:fixed;inset:0;background:rgba(20,30,45,.45);z-index:60;align-items:center;justify-content:center;padding:20px">
@@ -194,6 +211,7 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
+const esc = value => String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[ch]));
 let costCentres = [];
 
 function showMsg(el, text, kind) {
@@ -207,8 +225,27 @@ async function api(url, opts) {
   const r = await fetch(url, Object.assign({headers: {'Content-Type': 'application/json'}}, opts || {}));
   if (r.status === 401) { location.href = '/login'; throw new Error('unauth'); }
   const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data.detail || ('Lỗi ' + r.status));
+  if (r.status === 403 && data && data.must_change_password) {
+    location.href = '/account?first=1';
+    throw new Error('Đổi mật khẩu trước đã');
+  }
+  if (!r.ok) throw new Error(detailText(data, r.status));
   return data;
+}
+
+// FastAPI trả detail là chuỗi, hoặc danh sách lỗi kiểm tra dữ liệu -> đổi thành chữ dễ đọc
+function detailText(data, status) {
+  const d = data && data.detail !== undefined ? data.detail : data;
+  if (typeof d === 'string') return d;
+  if (Array.isArray(d)) {
+    return d.map(x => {
+      if (typeof x === 'string') return x;
+      const where = Array.isArray(x.loc) ? x.loc.filter(p => p !== 'body' && p !== 'query').join('.') : '';
+      return (where ? where + ': ' : '') + (x.msg || JSON.stringify(x));
+    }).join('; ');
+  }
+  if (d && typeof d === 'object') return d.message || d.msg || JSON.stringify(d);
+  return 'Lỗi ' + status;
 }
 
 document.querySelectorAll('.tabs button').forEach(b => {
@@ -234,7 +271,7 @@ async function loadCostCentres() {
 }
 
 async function loadEmployees() {
-  const emps = await api('/api/admin/employees');
+  const emps = await api('/api/admin/employees' + ($('showInactive').checked ? '?include_inactive=true' : ''));
   employeesCache = emps;
   const opts = (code) => costCentres.map(c =>
     `<option value="${c.code}" ${c.code === code ? 'selected' : ''}>${c.code} — ${c.name}</option>`).join('');
@@ -275,28 +312,37 @@ async function loadEmployees() {
   }));
 }
 
+$('showInactive').addEventListener('change', loadEmployees);
+
 async function loadProjects() {
   const q = $('projSearch').value.trim();
   const rows = await api('/api/admin/projects' + (q ? '?q=' + encodeURIComponent(q) : ''));
   $('projRows').innerHTML = rows.length ? rows.map(r =>
-    `<tr><td><small class="mono">${r.project_number}</small></td><td class="num">${r.n}</td></tr>`).join('')
+    `<tr><td><small class="mono">${esc(r.project_number)}</small></td><td class="num">${r.n}</td></tr>`).join('')
     : '<tr><td colspan="2" class="hint">Không có project khớp.</td></tr>';
 }
 
 async function loadEntries() {
   const q = $('entrySearch').value.trim();
-  const rows = await api('/api/admin/entries' + (q ? '?q=' + encodeURIComponent(q) : ''));
+  if (!$('entryEnd').value) $('entryEnd').value = fmtLocal(new Date());
+  if (!$('entryStart').value) {
+    const start = new Date();
+    start.setDate(start.getDate() - 6);
+    $('entryStart').value = fmtLocal(start);
+  }
+  const params = new URLSearchParams({q, start: $('entryStart').value, end: $('entryEnd').value});
+  const rows = await api('/api/admin/entries?' + params);
   const fmt = (d) => d.split('-').reverse().join('/');
   $('entryRows').innerHTML = rows.length ? rows.map(r => `    <tr>
-      <td>${fmt(r.work_date)}</td><td>${tsWeek(new Date(r.work_date + 'T12:00:00')).week}</td><td>${r.pers_no}</td><td>${r.employee_name}</td>
-      <td><small class="mono">${r.project_number}</small></td>
-      <td><small class="mono">${r.panel_number || '—'}</small></td>
-      <td>${r.description || ''}</td>
+      <td>${fmt(r.work_date)}</td><td>${tsWeek(new Date(r.work_date + 'T12:00:00')).week}</td><td>${r.pers_no}</td><td>${esc(r.employee_name)}</td>
+      <td><small class="mono">${esc(r.project_number)}</small></td>
+      <td><small class="mono">${esc(r.panel_number || '—')}</small></td>
+      <td>${esc(r.description || '')}</td>
       <td class="num">${r.normal_hours}</td><td class="num">${r.travel_hours}</td>
       <td class="num">${r.ot_a}</td><td class="num">${r.ot_b}</td>
-      <td><small class="mono">${r.cost_place || '—'}</small></td>
+      <td><small class="mono">${esc(r.cost_place || '—')}</small></td>
       <td><span class="badge-role" style="background:#eaf7f0;color:#176147">đã ghi</span></td>
-    </tr>`).join('') : '<tr><td colspan="13" class="hint">Chưa có dòng giờ nào trong 7 ngày qua.</td></tr>';
+    </tr>`).join('') : '<tr><td colspan="13" class="hint">Chưa có dòng giờ nào khớp bộ lọc.</td></tr>';
 }
 
 $('panelForm').addEventListener('submit', async (e) => {
@@ -317,6 +363,7 @@ $('panelForm').addEventListener('submit', async (e) => {
 
 let pt = null;
 $('projSearch').addEventListener('input', () => { clearTimeout(pt); pt = setTimeout(loadProjects, 250); });
+['entryStart', 'entryEnd'].forEach(id => $(id).addEventListener('change', loadEntries));
 let et = null;
 $('entrySearch').addEventListener('input', () => { clearTimeout(et); et = setTimeout(loadEntries, 250); });
 $('logout').addEventListener('click', async () => { await fetch('/api/logout', {method: 'POST'}); location.href = '/login'; });
@@ -387,11 +434,11 @@ async function openTimesheetFiles(empId) {
     $('fmFolder').textContent = 'Nơi lưu trên máy chủ (không phải máy bạn): ' + data.folder;
     $('fmRows').innerHTML = data.files.length ? data.files.map(f => `
       <tr>
-        <td><small class="mono">${f.name}</small>${f.is_master ? ' <span class="badge-role" style="background:#eaf7f0;color:#176147">đang dùng</span>' : `<button class="small ghost" data-use="${f.name}" title="Dùng file này để ghi dữ liệu">Dùng file này</button>`}</td>
+        <td><small class="mono">${esc(f.name)}</small></td>
         <td class="num">${fmtSize(f.size)}</td>
         <td>${f.mtime.replace('T', ' ').slice(0, 16)}</td>
         <td><a class="small ghost" style="text-decoration:none;padding:5px 10px;border-radius:7px;background:#eaeef4;color:#1d2433" href="${f.url}">Tải về</a>
-            <button class="small danger" data-unlink="${f.name}">Xoá</button></td>
+            <button class="small danger" data-unlink="${esc(f.name)}">Xoá</button></td>
       </tr>`).join('')
       : '<tr><td colspan="4" class="hint">Nhân viên này chưa có file timesheet nào.</td></tr>';
     document.querySelectorAll('[data-use]').forEach(b => b.addEventListener('click', async () => {
@@ -419,29 +466,68 @@ $('fileModal').addEventListener('click', (e) => {
   if (e.target === $('fileModal')) $('fileModal').style.display = 'none';
 });
 
+async function showImportResult(d) {
+  const success = d.results.filter(x => x.ok);
+  const weeks = success.flatMap(x => x.weeks).map(x => x.week_start).sort();
+  if (weeks.length) {
+    $('entryStart').value = weeks[0];
+    const end = new Date(weeks[weeks.length - 1] + 'T12:00:00');
+    end.setDate(end.getDate() + 6);
+    $('entryEnd').value = fmtLocal(end);
+    $('entrySearch').value = '';
+    await Promise.all([loadEntries(), loadProjects(), loadWeekBadge()]);
+  }
+  return {data: d, text: `Đã nhập ${d.succeeded}/${d.total} file.\n` + d.results.map(x =>
+    x.ok ? `${x.filename}: ${x.employee} · ${x.weeks_imported} tuần · ${x.imported} dòng giờ` +
+      (x.warnings.length ? '\n' + x.warnings.join('\n') : '') : `${x.filename}: LỖI · ${x.error}`).join('\n')};
+}
+async function uploadTimesheets(input, employeeId) {
+  if (!input.files.length) throw new Error('Chọn file Excel trước đã');
+  const fd = new FormData();
+  for (const file of input.files) fd.append('files', file);
+  const query = employeeId ? '?employee_id=' + employeeId : '';
+  const r = await fetch('/api/admin/timesheet-upload-batch' + query, {method: 'POST', body: fd});
+  const raw = await r.text();
+  let d;
+  try { d = JSON.parse(raw); }
+  catch (e) {
+    throw new Error('Máy chủ trả về lỗi ' + r.status + ' (không phải JSON). Nội dung: ' + raw.slice(0, 200));
+  }
+  if (!r.ok) throw new Error(detailText(d, r.status));
+  return showImportResult(d);
+}
+$('resyncFiles').addEventListener('click', async () => {
+  $('resyncFiles').disabled = true;
+  $('bulkUpload').disabled = true;
+  $('bulkResults').textContent = 'Đang đọc lại tất cả file đã lưu…';
+  try {
+    const d = await api('/api/admin/timesheet-resync', {method: 'POST'});
+    const result = await showImportResult(d);
+    $('bulkResults').textContent = result.text;
+  } catch (e) { $('bulkResults').textContent = e.message; }
+  finally { $('resyncFiles').disabled = false; $('bulkUpload').disabled = false; }
+});
+$('bulkUpload').addEventListener('click', async () => {
+  $('bulkUpload').disabled = true;
+  $('bulkResults').textContent = 'Đang nhập…';
+  try {
+    const result = await uploadTimesheets($('bulkFiles'));
+    $('bulkResults').textContent = result.text;
+    if (result.data.succeeded === result.data.total) $('bulkFiles').value = '';
+  } catch (e) { $('bulkResults').textContent = e.message; }
+  finally { $('bulkUpload').disabled = false; }
+});
 $('fmUpload').addEventListener('click', async () => {
   if (!currentFilesEmp) return;
-  const inp = $('fmFile');
-  if (!inp.files.length) { showMsg($('fmMsg'), 'Chọn file .xlsx trước đã', 'err'); return; }
-  const fd = new FormData();
-  fd.append('file', inp.files[0]);
   $('fmUpload').disabled = true;
   try {
-    const r = await fetch('/api/admin/timesheet-upload?employee_id=' + currentFilesEmp, {
-      method: 'POST', body: fd
-    });
-    const d = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(d.detail || ('Lỗi ' + r.status));
-    showMsg($('fmMsg'), `Đã up file: ${d.imported} dòng giờ của tuần bắt đầu `
-      + d.week_start.split('-').reverse().join('/') + ' · file: '
-      + (d.file_path || '').split('/').pop(), 'ok');
-    inp.value = '';
+    const result = await uploadTimesheets($('fmFile'), currentFilesEmp);
+    if (result.data.succeeded === result.data.total) $('fmFile').value = '';
     await openTimesheetFiles(currentFilesEmp);
-  } catch (e) {
-    showMsg($('fmMsg'), e.message, 'err');
-  } finally {
-    $('fmUpload').disabled = false;
-  }
+    $('fmMsg').textContent = result.text;
+    $('fmMsg').className = 'msg show ' + (result.data.succeeded === result.data.total ? 'ok' : 'err');
+  } catch (e) { showMsg($('fmMsg'), e.message, 'err'); }
+  finally { $('fmUpload').disabled = false; }
 });
 
 // ---------- thêm nhân viên ----------
@@ -595,7 +681,7 @@ async function loadRequests() {
     <tr>
       <td>${fmt(r.created_at)}</td>
       <td>${r.pers_no ?? '—'}</td>
-      <td>${r.employee_name || '—'}</td>
+      <td>${esc(r.employee_name || '—')}</td>
       <td><small class="mono">${r.username}</small></td>
       <td>${r.note || ''}</td>
       <td>${reqStatusLabel(r.status)}${r.temp_password ? ` · <b class="mono">${r.temp_password}</b>` : ''}</td>

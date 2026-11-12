@@ -130,8 +130,8 @@ def main(reset: bool = False) -> None:
             place = places[0] if places else None
             conn.execute(
                 """INSERT INTO employees(pers_no, name, emp_type, username, password_hash,
-                                        cost_place_code, place, is_admin)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, 0)""",
+                                        cost_place_code, place, is_admin, must_change_password)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, 0, 1)""",
                 (pers_no, name, emp_type, username, auth.hash_password(password),
                  default_cost_place(emp_type, places), place),
             )
@@ -142,12 +142,17 @@ def main(reset: bool = False) -> None:
             admin_pw = "admin@2026"
             conn.execute(
                 """INSERT INTO employees(pers_no, name, emp_type, username, password_hash,
-                                        cost_place_code, place, is_admin)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, 1)""",
+                                        cost_place_code, place, is_admin, must_change_password)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, 1, 1)""",
                 (0, "ADMIN", "A", "admin", auth.hash_password(admin_pw), "1079.01", None),
             )
             creds.insert(0, ["admin", admin_pw, 0, "ADMIN", "1079.01"])
 
+    from . import roster
+    result = roster.sync_if_changed(conn)
+    creds.extend(result['new_credentials'])
+    active_usernames = {r['username'] for r in conn.execute('SELECT username FROM employees WHERE active = 1')}
+    creds = [r for r in creds if r[0] in active_usernames]
     counts = {
         "cost_centres": conn.execute("SELECT COUNT(*) c FROM cost_centres").fetchone()["c"],
         "projects": conn.execute("SELECT COUNT(*) c FROM projects").fetchone()["c"],

@@ -1,0 +1,24 @@
+CHỈ CẦN BẤM ĐÚP BAT_DAU.bat
+============================
+
+Nếu đã có bộ Windows kèm LocalTunnel:
+1. Tắt cửa sổ chạy web và tunnel cũ.
+2. Giải nén bản cập nhật, copy các file trong ChamCongVDL vào thư mục
+   ứng dụng hiện có, chấp nhận thay thế file trùng tên.
+3. Bấm đúp BAT_DAU.bat. Chỉ cần chạy file này.
+
+Chương trình tự chạy server, đợi web sẵn sàng rồi mở trình duyệt và LocalTunnel.
+Khi kết nối thành công, cửa sổ chạy hiện LINK PUBLIC và Tunnel Password.
+Hai thông tin này cũng nằm trong data\public-link.txt.
+
+Giữ cửa sổ chạy mở trong khi sử dụng; Ctrl+C sẽ dừng cả server và tunnel.
+Không mở thêm Chay_web.bat, Chay_web_public.bat hoặc Chay_link_public.bat cùng lúc.
+Nếu báo cổng đang được sử dụng, tắt cửa sổ chạy cũ rồi mở BAT_DAU.bat lại.
+
+Tên link vẫn lấy từ TEN_LINK_PUBLIC.txt. Bản cập nhật nhỏ không thay file tên này
+hoặc dữ liệu trong data. Nếu chưa có file tên, BAT_DAU.bat tạo tên mặc định
+chamcong-vdl-vn. LocalTunnel có thể không cấp tên nếu tên chưa sẵn sàng;
+chương trình thử lại trong tối đa 60 giây rồi báo lỗi, không tự đổi tên.
+
+Nếu máy chưa có bộ ứng dụng, dùng gói Windows đầy đủ thay vì bản cập nhật nhỏ.
+Giải nén toàn bộ thư mục trước khi chạy. Không cần cài IDE, Python hay Node.js.

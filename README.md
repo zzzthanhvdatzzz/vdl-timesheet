@@ -1,3 +1,28 @@
+# Bản Windows portable cập nhật
+
+Đọc `HUONG_DAN.txt` để chạy và nâng cấp. Cách chạy mặc định: bấm đúp **`BAT_DAU.bat`**.
+Chương trình tự chạy server, đợi web sẵn sàng, mở trình duyệt và kết nối LocalTunnel
+portable theo tên link đã lưu. Không cần cài IDE/Python/Node.
+`Chay_web.bat` chỉ chạy nội bộ; `Chay_web_public.bat` là cách chạy gộp cũ vẫn được hỗ trợ.
+Link public và Tunnel Password được ghi vào `data/public-link.txt` khi kết nối thành công.
+Tên yêu cầu được lưu trong `TEN_LINK_PUBLIC.txt` (mặc định `chamcong-vdl-vn`).
+Mỗi lần khởi động đều yêu cầu đúng tên đó; nếu không được cấp đúng tên thì báo lỗi,
+không tự dùng URL ngẫu nhiên. LocalTunnel công cộng không đảm bảo giữ chỗ tên lâu dài.
+Để khởi động lại web trong khi giữ phiên tunnel, chạy `Chay_web.bat` và
+`Chay_link_public.bat` ở hai cửa sổ riêng, giữ cửa sổ tunnel mở.
+Xem `HUONG_DAN_LINK_PUBLIC.txt` để áp dụng bản vá cho bộ Windows đã tải trước đó.
+
+- Nhập nhiều file Excel, nhập toàn bộ tuần có dữ liệu; có nút đồng bộ lại mọi file đã lưu.
+- Kho file phẳng `data/timesheets/`, có chỉ mục file theo nhân viên/tuần trong SQLite.
+- Khi sửa giờ, cập nhật mọi file đã đăng ký chứa tuần đó; báo lỗi nếu Windows khóa file.
+- Chuyển file từ cấu trúc thư mục từng người của bản cũ khi khởi động.
+- Danh sách xưởng từ `resources/nhan-vien-xuong.xlsx`: bảo toàn ID và mật khẩu cũ,
+  cấp mã mới nếu cần, khóa tài khoản ngoài danh sách và giữ lịch sử.
+- Description: 10 mục cố định và Other cho phép nhập tự do; kiểm tra cả trên server.
+- Chạy kiểm tra: `python -m unittest discover -s tests -v` trong môi trường phát triển.
+
+Phần bên dưới mô tả kiến trúc gốc; cách chạy Windows dùng hướng dẫn ở trên.
+
 # Chấm công VDL VN
 
 Hệ thống chấm công nội bộ cho xưởng: nhân viên nhập giờ theo Project/Panel, hệ thống tự sinh
@@ -8,7 +33,7 @@ file timesheet `.xlsx` đúng form gốc của công ty, admin quản lý nhân 
 **Nhân viên**
 - Đăng nhập bằng tài khoản riêng (mỗi người một tài khoản).
 - Nhập **panel number** → hệ thống tự điền **project number** (kèm mô tả panel).
-- Chọn **Description of proceedings** từ danh sách gợi ý, hoặc gõ tay nếu chưa có trong danh sách.
+- Chọn **Description of proceedings** từ 10 mục cố định; chọn **Other** để nhập tự do.
 - Nhập giờ: Normal (tối đa 8h/ngày), Traveling, Overtime A (ngày thường), Overtime B (Thứ Bảy/Chủ nhật).
 - Sửa lại hoặc xoá dòng giờ đã lưu; dữ liệu ghi thẳng vào file timesheet trên máy chủ.
 - Thanh tiến trình tuần: mục tiêu 40h hành chính, có cờ đích, tự chuyển xanh khi đủ.
@@ -69,7 +94,7 @@ app/
   static/         login.html, worker.html, admin.html, account.html, style.css
 data/
   source/         file mẫu timesheet (tự đặt, không commit)
-  timesheets/     file .xlsx của từng nhân viên (tự sinh, không commit)
+  timesheets/     mọi file Excel nằm trực tiếp ở đây, không chia thư mục người
   app.db          database (tự sinh, không commit)
 scripts/
   sync_timesheets.sh   kéo toàn bộ file timesheet từ máy chủ về máy admin

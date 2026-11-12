@@ -1,0 +1,30 @@
+GIỮ TÊN LINK LOCALTUNNEL — BẢN CẬP NHẬT NHỎ
+==========================================
+
+Nếu đã có bộ ChamCongVDL-Windows-Public-DongBo:
+1. Tắt cửa sổ chạy public cũ.
+2. Giải nén bản vá và copy các file trong thư mục ChamCongVDL vào thư mục
+   ứng dụng hiện có, chấp nhận thay thế các file trùng tên. Không thay đổi data.
+3. Bấm đúp BAT_DAU.bat nếu đã cài bản cập nhật một lần bấm;
+   Chay_web_public.bat trong bản trước cũng tự chạy cả server và tunnel.
+
+Tên mặc định trong TEN_LINK_PUBLIC.txt: chamcong-vdl-vn
+Link được yêu cầu mỗi lần chạy: https://chamcong-vdl-vn.loca.lt
+Có thể mở TEN_LINK_PUBLIC.txt bằng Notepad để đổi tên.
+Chỉ nhập tên, không nhập https:// hoặc .loca.lt.
+Giữ lại file tên này nếu nâng cấp ứng dụng về sau.
+
+Nếu muốn giữ nguyên phiên tunnel khi khởi động lại riêng web:
+- Chạy Chay_web.bat và Chay_link_public.bat ở hai cửa sổ riêng.
+- Giữ cửa sổ Chay_link_public.bat mở, chỉ tắt/mở lại Chay_web.bat.
+- Link giữ nguyên khi phiên tunnel vẫn kết nối. Khi web tắt thì chưa truy cập được.
+- Không đồng thời chạy thêm Chay_web_public.bat.
+
+LocalTunnel công cộng không giữ chỗ tên vĩnh viễn. Nếu tên chưa được cấp đúng,
+chương trình thử lại cùng tên mỗi 5 giây, tối đa 60 giây, rồi báo lỗi;
+không tự đổi sang link khác. Đóng tunnel cũ, đợi một lúc
+rồi thử lại. Muốn đảm bảo sở hữu tên lâu dài cần tunnel riêng hoặc dịch vụ có
+giữ chỗ tên miền.
+
+Tunnel Password có thể thay đổi khi IP Internet của máy chạy web thay đổi.
+Link và password thực tế được ghi vào data\public-link.txt khi kết nối thành công.

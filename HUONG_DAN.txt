@@ -1,0 +1,108 @@
+CHẤM CÔNG VDL VN — WINDOWS PORTABLE
+=================================
+Không cần IDE, không cần cài Python/Node.js. Giải nén toàn bộ thư mục trước khi chạy.
+Bộ này dành cho Windows x64 (Windows 10/11).
+
+CÁCH CHẠY HẰNG NGÀY — CHỈ BẤM MỘT FILE
+   Bấm đúp BAT_DAU.bat. Chương trình tự chạy server, đợi web sẵn sàng,
+   mở trình duyệt và kết nối LocalTunnel theo TEN_LINK_PUBLIC.txt.
+   Khi kết nối thành công, copy LINK PUBLIC và Tunnel Password trong cửa sổ
+   chạy hoặc trong data\public-link.txt để gửi người cần truy cập.
+   Giữ cửa sổ này mở; Ctrl+C sẽ dừng server và tunnel.
+   Chỉ chạy BAT_DAU.bat, không mở thêm các file chạy khác cùng lúc.
+   Những cách chạy tách riêng bên dưới là tùy chọn.
+
+1. CHẠY TRONG MÁY
+   Bấm đúp Chay_web.bat.
+   Trình duyệt chỉ tự mở khi server đã khởi động thành công.
+   Địa chỉ mặc định: http://127.0.0.1:8000
+
+2. CHẠY LINK PUBLIC BẰNG LOCALTUNNEL
+   Tắt cửa sổ chạy web/tunnel cũ, rồi bấm đúp BAT_DAU.bat.
+   Chương trình tự chạy web và LocalTunnel có sẵn trong bộ.
+   Chờ dòng LINK PUBLIC: https://....loca.lt
+   Link và Tunnel Password cũng được lưu tại data\public-link.txt.
+   Gửi link và Tunnel Password cho người cần truy cập.
+   Nếu chưa lấy được password, trên máy chạy web mở:
+       https://loca.lt/mytunnelpassword
+   Tunnel Password khác với mật khẩu đăng nhập ứng dụng.
+   Link chỉ hoạt động khi cửa sổ chạy còn mở, máy có Internet và không Sleep.
+   Tên link đọc từ TEN_LINK_PUBLIC.txt, mặc định là chamcong-vdl-vn.
+   Mỗi lần chạy đều yêu cầu https://chamcong-vdl-vn.loca.lt.
+   Muốn đổi tên: mở TEN_LINK_PUBLIC.txt bằng Notepad, điền một tên duy nhất
+   bằng chữ không dấu a-z, số và dấu -, không nhập cả URL. Lưu rồi chạy lại.
+   LocalTunnel KHÔNG giữ chỗ tên vĩnh viễn. Nếu tên đang được dùng hoặc dịch vụ
+   không cấp đúng tên, chương trình thử lại cùng tên mỗi 5 giây, tối đa 60 giây,
+   rồi báo lỗi, không tự chuyển sang link ngẫu nhiên.
+   Đóng phiên tunnel cũ, chờ một lúc rồi thử lại. Nếu vẫn không được cấp tên,
+   bạn phải chọn tên khác hoặc dùng dịch vụ/tunnel riêng có giữ chỗ tên miền.
+   LocalTunnel cần Internet và có thể bị mạng công ty chặn.
+
+   GIỮ NGUYÊN PHIÊN TUNNEL KHI KHỞI ĐỘNG LẠI WEB:
+   Nếu cần giữ tunnel mở khi khởi động lại riêng web, thay vì BAT_DAU.bat,
+   chạy riêng hai file:
+     - Chay_web.bat: cửa sổ chạy web.
+     - Chay_link_public.bat: cửa sổ chạy LocalTunnel.
+   Giữ cửa sổ LocalTunnel mở. Có thể tắt/mở lại Chay_web.bat; phiên tunnel
+   và link giữ nguyên khi tunnel vẫn kết nối. Trong lúc web tắt, link chưa vào được.
+   Không chạy đồng thời BAT_DAU.bat (hoặc Chay_web_public.bat) và Chay_link_public.bat.
+   Đổi mật khẩu tài khoản mặc định trước khi chia sẻ link công khai.
+
+3. ĐĂNG NHẬP
+   Admin khởi tạo: admin / admin@2026.
+   Tài khoản cũ giữ nguyên mã, tên đăng nhập và mật khẩu.
+   Nhân viên mới: xem data\tai-khoan-nhan-vien-moi.csv.
+   Lần cài mới: xem thêm data\credentials.csv.
+   Danh sách xưởng được cập nhật từ resources\nhan-vien-xuong.xlsx:
+   20 nhân viên đang làm; 7 người mới nhận mã 64–70 khi dùng database gốc.
+   Người ngoài danh sách được khóa, giữ nguyên lịch sử, không xóa tài khoản.
+   Có tùy chọn hiện tài khoản đã khóa ở màn hình admin.
+
+4. NHẬP VÀ ĐỒNG BỘ TẤT CẢ FILE EXCEL
+   Admin > Nhân viên & cost place > Nhập nhiều file timesheet.
+   Chọn một hoặc nhiều file .xlsx/.xlsm và bấm Nhập tất cả file đã chọn.
+   Hệ thống xác định nhân viên theo tên D1; nếu thiếu tên thì dùng mã O1.
+   File không khớp nhân viên: mở danh sách file của đúng nhân viên và upload ở đó.
+   Mỗi file phải theo form timesheet; hệ thống nhập tất cả sheet tuần có Project.
+   Nếu ô giờ là công thức chưa có kết quả: mở bằng Excel, tính lại và lưu rồi upload.
+   Mỗi tuần nhập sẽ thay thế dữ liệu của chính tuần đó. Tuần trống/ngoài file giữ nguyên.
+   Upload lại cùng file không tạo dòng giờ trùng.
+   File lỗi được báo riêng; file hợp lệ vẫn được nhập và có kết quả cụ thể.
+   Nếu nhiều file chứa cùng nhân viên và tuần, file nhập sau là dữ liệu cuối cùng.
+   Các file đã đăng ký có tuần đó đều được ghi đồng bộ khi nhân viên sửa giờ.
+   File cũ đã lưu: bấm Đồng bộ lại tất cả file đã lưu để đọc lại toàn bộ nội dung.
+   Khi đồng bộ lại, file tải lên gần đây hơn được xử lý sau.
+   Sau nhập, tab Giờ đã chấm tự đổi khoảng ngày sang thời gian vừa nhập.
+   Bảng hiển thị tối đa 500 dòng mới nhất; thu hẹp khoảng ngày để xem chi tiết.
+
+5. FILE ĐƯỢC LƯU Ở ĐÂU
+   Database: data\app.db.
+   TẤT CẢ file Excel nằm thẳng trong data\timesheets\:
+       data\timesheets\timesheet-A.xlsx
+       data\timesheets\timesheet-B.xlsx
+   KHÔNG tạo thư mục riêng cho từng người.
+   Giữ tên file upload; nếu trùng tên với file của người khác, tự thêm hậu tố
+   để tránh ghi đè. Bản tải tất cả ZIP cũng chứa dãy file, không chia thư mục người.
+   Dữ liệu nằm trên máy chạy web, kể cả khi bạn upload qua link public.
+   Đóng file Excel trên máy chủ khi chấm công để Windows cho phép ghi cập nhật.
+   Nếu một file bị khóa, hệ thống báo chưa đồng bộ được file đó.
+
+6. NÂNG CẤP TỪ BẢN CŨ
+   a. Tắt web và LocalTunnel cũ. Sao lưu toàn bộ thư mục data cũ.
+   b. Giải nén bản mới sang thư mục RIÊNG.
+   c. Copy toàn bộ data cũ vào bản mới để giữ database và các timesheet.
+      Giữ nguyên resources, app, python, vendor và các file chạy của bản mới.
+      Nếu đã tự đặt tên link, giữ lại TEN_LINK_PUBLIC.txt cũ khi nâng cấp.
+   d. Bấm đúp BAT_DAU.bat để chạy web và public link trong một lần.
+      Hệ thống tự chuyển file từ thư mục từng người cũ sang data\timesheets
+      và cập nhật danh sách xưởng; giữ nguyên dữ liệu chấm công cũ.
+   e. Trên trình duyệt bấm Ctrl+F5. Bấm Đồng bộ lại tất cả file đã lưu
+      để nhập cả các tuần trước đây bản cũ chưa đọc.
+
+7. DESCRIPTION
+   Có 10 lựa chọn cố định (bao gồm hai mục MOD/ Changesets mới).
+   Không cho sửa nội dung các lựa chọn này.
+   Chọn Other để hiện ô nhập mô tả tự do. Khi sửa dòng cũ có mô tả tự do,
+   hệ thống chuyển sang Other và giữ nguyên nội dung.
+
+Tắt ứng dụng: Ctrl+C hoặc đóng cửa sổ. Nếu lỗi, xem thông báo trong cửa sổ chạy.

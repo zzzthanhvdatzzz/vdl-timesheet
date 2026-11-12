@@ -1,31 +1,20 @@
-# Tạo môi trường Python (dùng uv)
+# Dữ liệu thật của công ty - KHÔNG đưa lên GitHub
+data/
+*.db
+*.db-journal
+credentials.csv
+tai-khoan-nhan-vien-moi.csv
+*.xlsx
+*.xlsm
+
+# Bộ chạy kèm (nặng hàng chục MB)
+python/
+vendor/
+public-link.txt
+
+# Rác
 __pycache__/
-*.py[cod]
-.venv/
-.venv-*/
-venv/
-
-# Dữ liệu thật: database, mật khẩu khởi tạo, file timesheet, file admin up lên
-data/app.db
-data/app.db-wal
-data/app.db-shm
-data/credentials.csv
-data/timesheets/
-data/source/_uploads/
-
-# File mẫu timesheet của công ty (không đưa lên repo) - xem README
-data/source/*.xlsx
-
-# Ảnh chụp màn hình khi kiểm thử
-screenshot_*.png
-
-# Cấu hình email chứa mật khẩu ứng dụng
-email.env
-*.env
-
-# Hệ điều hành / editor
+*.pyc
+log.txt
 .DS_Store
-Thumbs.db
-.idea/
-.vscode/
-*.log
+*.zip
