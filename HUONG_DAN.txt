@@ -47,3 +47,13 @@ HƯỚNG DẪN DÙNG (Windows) - Chấm công VDL VN
      hoặc VPS.
    - Không đưa link public cho người ngoài, dữ liệu chấm công là dữ liệu
      cá nhân của nhân viên.
+
+8. BẬT HTTPS (macOS/Linux)
+   Chạy: bash run_https.sh
+   Mở: https://<IP-máy-chủ>:8443
+   Lần đầu trình duyệt cảnh báo "không an toàn" vì chứng chỉ tự ký:
+   bấm Nâng cao -> Tiếp tục truy cập.
+   Muốn hết cảnh báo: cài file ~/.config/vdl-timesheet/certs/cert.pem
+   vào kho tin cậy của máy (macOS: Keychain -> Always Trust).
+   Trên Windows dùng bản zip: mở bằng https qua Cloudflare Tunnel hoặc
+   đặt sau Caddy/Nginx nếu cần chứng chỉ hợp lệ.

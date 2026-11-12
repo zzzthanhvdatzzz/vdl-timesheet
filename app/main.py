@@ -52,6 +52,9 @@ def _startup():
     storage.migrate_legacy(conn)
     from . import roster
     roster.sync_if_changed(conn)
+    # luôn đảm bảo có tài khoản admin để đăng nhập lần đầu
+    from .seed import ensure_admin
+    ensure_admin(conn)
     with conn:
         conn.execute("UPDATE entries SET status = 'approved' WHERE status != 'approved'")
     conn.close()
@@ -183,7 +186,7 @@ def notify_admin(conn, text: str) -> None:
 
 # ---------------------------------------------------------------- auth api
 @app.post("/api/login")
-def login(body: LoginIn, response: Response, conn=Depends(get_conn)):
+def login(body: LoginIn, request: Request, response: Response, conn=Depends(get_conn)):
     row = conn.execute(
         "SELECT * FROM employees WHERE username = ? AND active = 1", (body.username.strip(),)
     ).fetchone()
@@ -195,7 +198,8 @@ def login(body: LoginIn, response: Response, conn=Depends(get_conn)):
             "INSERT INTO sessions(token, employee_id, created_at) VALUES (?, ?, ?)",
             (token, row["id"], datetime.now().isoformat(timespec="seconds")),
         )
-    response.set_cookie(COOKIE, token, httponly=True, samesite="lax", max_age=60 * 60 * 12)
+    response.set_cookie(COOKIE, token, httponly=True, samesite="lax", max_age=60 * 60 * 12,
+                        secure=request.url.scheme == "https")
     return {"ok": True, "is_admin": bool(row["is_admin"])}
 
 
@@ -795,6 +799,7 @@ def admin_entries(
 @app.post("/api/me/password")
 def change_own_password(
     body: PasswordChangeIn,
+    request: Request,
     response: Response,
     user=Depends(current_user),
     conn=Depends(get_conn),
@@ -810,7 +815,8 @@ def change_own_password(
         conn.execute("DELETE FROM sessions WHERE employee_id = ?", (user["id"],))
         conn.execute("INSERT INTO sessions(token, employee_id, created_at) VALUES (?, ?, ?)",
                      (token, user["id"], datetime.now().isoformat(timespec="seconds")))
-    response.set_cookie(COOKIE, token, httponly=True, samesite="lax", max_age=60 * 60 * 12)
+    response.set_cookie(COOKIE, token, httponly=True, samesite="lax", max_age=60 * 60 * 12,
+                        secure=request.url.scheme == "https")
     return {"ok": True}
 
 
