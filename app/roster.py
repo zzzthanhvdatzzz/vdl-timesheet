@@ -24,7 +24,9 @@ def read_names(path):
 
 def sync_if_changed(conn):
     if not ROSTER_PATH.is_file():
-        raise FileNotFoundError(f'Thiếu danh sách nhân viên: {ROSTER_PATH}')
+        # Repo mã nguồn không kèm file nhân sự của công ty: bỏ qua, web vẫn chạy
+        # với tài khoản admin và danh sách nhân viên thêm tay.
+        return {'added': 0, 'new_credentials': [], 'skipped': True}
     digest = hashlib.sha256(ROSTER_PATH.read_bytes()).hexdigest()
     saved = conn.execute("SELECT value FROM app_settings WHERE key = 'roster_hash'").fetchone()
     if saved and saved['value'] == digest:

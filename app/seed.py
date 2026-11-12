@@ -85,15 +85,40 @@ def default_cost_place(emp_type: str, places: list) -> str:
     return "1074.01" if emp_type == "E" else "1060.01"
 
 
-def main(reset: bool = False) -> None:
-    if not os.path.exists(SOURCE_XLSX):
-        sys.exit(f"Không thấy file nguồn: {SOURCE_XLSX}")
+def ensure_admin(conn) -> None:
+    """Tạo tài khoản admin mặc định nếu chưa có (dùng được cả khi thiếu file Excel mẫu)."""
+    admin = conn.execute("SELECT id FROM employees WHERE is_admin = 1").fetchone()
+    if admin:
+        return
+    with conn:
+        conn.execute(
+            """INSERT INTO employees(pers_no, name, emp_type, username, password_hash,
+                                    cost_place_code, place, is_admin)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 1)""",
+            (0, "ADMIN", "A", "admin", auth.hash_password("admin@2026"), None, None),
+        )
+    print("Đã tạo tài khoản admin mặc định: admin / admin@2026")
 
+
+def main(reset: bool = False) -> None:
     if reset and os.path.exists(db.DB_PATH):
         os.remove(db.DB_PATH)
         print("đã xoá DB cũ")
 
     db.init_db()
+
+    if not os.path.exists(SOURCE_XLSX):
+        print("KHÔNG THẤY FILE EXCEL MẪU:")
+        print(f"  {SOURCE_XLSX}")
+        print("Web vẫn chạy được với tài khoản admin mặc định, nhưng chưa có danh sách")
+        print("nhân viên, project và panel. Hãy copy file 'FORM TIMESHEET 2026 VDL VN.xlsx'")
+        print("vào thư mục data/source/ rồi chạy lại: python -m app.seed")
+        conn = db.connect()
+        try:
+            ensure_admin(conn)
+        finally:
+            conn.close()
+        return
 
     wb = openpyxl.load_workbook(SOURCE_XLSX, data_only=True)
     cost_centres = read_cost_centres(wb["Cost centre"])
