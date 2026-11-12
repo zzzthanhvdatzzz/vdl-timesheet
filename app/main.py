@@ -89,37 +89,6 @@ def require_admin(user=Depends(current_user)):
     return user
 
 
-# Endpoint vẫn dùng được khi bắt buộc đổi mật khẩu lần đầu
-PASSWORD_CHANGE_PATHS = {
-    "/api/me", "/api/me/password", "/api/logout", "/api/password-request",
-    "/account", "/login", "/api/health", "/favicon.ico",
-}
-
-
-@app.middleware("http")
-async def force_password_change(request: Request, call_next):
-    path = request.url.path
-    if path in PASSWORD_CHANGE_PATHS or path.startswith("/static"):
-        return await call_next(request)
-    sid = request.cookies.get(COOKIE)
-    if sid:
-        conn = db.connect()
-        try:
-            row = conn.execute(
-                "SELECT must_change_password FROM sessions s JOIN employees e ON e.id = s.employee_id"
-                " WHERE s.token = ? AND e.active = 1", (sid,),
-            ).fetchone()
-        finally:
-            conn.close()
-        if row and row["must_change_password"]:
-            return JSONResponse(
-                status_code=403,
-                content={"detail": "Bạn phải đổi mật khẩu trước khi dùng hệ thống",
-                         "must_change_password": True},
-            )
-    return await call_next(request)
-
-
 def user_payload(user: dict, conn) -> dict:
     cc = None
     if user.get("cost_place_code"):
@@ -226,8 +195,7 @@ def login(body: LoginIn, response: Response, conn=Depends(get_conn)):
             (token, row["id"], datetime.now().isoformat(timespec="seconds")),
         )
     response.set_cookie(COOKIE, token, httponly=True, samesite="lax", max_age=60 * 60 * 12)
-    return {"ok": True, "is_admin": bool(row["is_admin"]),
-            "must_change_password": bool(row["must_change_password"])}
+    return {"ok": True, "is_admin": bool(row["is_admin"])}
 
 
 @app.post("/api/logout")
@@ -730,8 +698,8 @@ def admin_create_employee(body: EmployeeNew, admin=Depends(require_admin), conn=
     with conn:
         cur = conn.execute(
             """INSERT INTO employees(pers_no, name, emp_type, username, password_hash,
-                   cost_place_code, is_admin, active, must_change_password)
-               VALUES (?, ?, ?, ?, ?, ?, 0, 1, 1)""",
+                   cost_place_code, is_admin, active)
+               VALUES (?, ?, ?, ?, ?, ?, 0, 1)""",
             (body.pers_no, name, emp_type, username, auth.hash_password(password), code),
         )
         emp_id = cur.lastrowid
@@ -744,7 +712,7 @@ def admin_reset_password(emp_id: int, body: PasswordIn, admin=Depends(require_ad
     if not conn.execute("SELECT 1 FROM employees WHERE id = ?", (emp_id,)).fetchone():
         raise HTTPException(status_code=404, detail="Không thấy nhân viên")
     with conn:
-        conn.execute("UPDATE employees SET password_hash = ?, must_change_password = 1 WHERE id = ?",
+        conn.execute("UPDATE employees SET password_hash = ? WHERE id = ?",
                      (auth.hash_password(body.new_password), emp_id))
         conn.execute("DELETE FROM sessions WHERE employee_id = ?", (emp_id,))
     return {"ok": True}
@@ -836,7 +804,7 @@ def change_own_password(
         raise HTTPException(status_code=400, detail="Mật khẩu mới phải khác mật khẩu cũ")
     token = auth.new_token()
     with conn:
-        conn.execute("UPDATE employees SET password_hash = ?, must_change_password = 0 WHERE id = ?",
+        conn.execute("UPDATE employees SET password_hash = ? WHERE id = ?",
                      (auth.hash_password(body.new_password), user["id"]))
         conn.execute("DELETE FROM sessions WHERE employee_id = ?", (user["id"],))
         conn.execute("INSERT INTO sessions(token, employee_id, created_at) VALUES (?, ?, ?)",
@@ -890,7 +858,7 @@ def issue_password(req_id: int, admin=Depends(require_admin), conn=Depends(get_c
         raise HTTPException(status_code=400, detail="Không xác định được nhân viên")
     new_pw = gen_temp_password()
     with conn:
-        conn.execute("UPDATE employees SET password_hash = ?, must_change_password = 1 WHERE id = ?",
+        conn.execute("UPDATE employees SET password_hash = ? WHERE id = ?",
                      (auth.hash_password(new_pw), row["employee_id"]))
         conn.execute("DELETE FROM sessions WHERE employee_id = ?", (row["employee_id"],))
         conn.execute(

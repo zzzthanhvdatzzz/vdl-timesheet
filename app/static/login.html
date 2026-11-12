@@ -72,7 +72,7 @@ document.getElementById('f').addEventListener('submit', async (e) => {
     m.classList.add('show');
     return;
   }
-  location.href = d.must_change_password ? '/account?first=1' : (d.is_admin ? '/admin' : '/worker');
+  location.href = d.is_admin ? '/admin' : '/worker';
 });
 
 document.getElementById('forgotLink').addEventListener('click', (e) => {
