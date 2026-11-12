@@ -173,7 +173,11 @@ class TimesheetUploadTests(unittest.TestCase):
     def test_roster_exactly_matches_supplied_names_and_keeps_history(self):
         before = self.snapshot()
         original_hash = self.conn.execute('SELECT password_hash FROM employees WHERE id=1').fetchone()[0]
-        with patch.object(roster, 'read_names', return_value=['TEST', 'New Person']):
+        # file danh sách nhân viên có thể không tồn tại (bản clone từ GitHub) -> tạo file tạm
+        roster_file = self.root / 'roster.xlsx'
+        roster_file.write_bytes(b'dummy')
+        with patch.object(roster, 'ROSTER_PATH', roster_file), \
+                patch.object(roster, 'read_names', return_value=['TEST', 'New Person']):
             result = roster.sync_if_changed(self.conn)
             self.assertEqual(result['added'], 1)
             self.assertEqual({r[0] for r in self.conn.execute('SELECT name FROM employees WHERE active=1')}, {'TEST', 'New Person'})

@@ -475,7 +475,8 @@ async function showImportResult(d) {
   }
   return {data: d, text: `Đã nhập ${d.succeeded}/${d.total} file.\n` + d.results.map(x =>
     x.ok ? `${x.filename}: ${x.employee} · ${x.weeks_imported} tuần · ${x.imported} dòng giờ` +
-      (x.warnings.length ? '\n' + x.warnings.join('\n') : '') : `${x.filename}: LỖI · ${x.error}`).join('\n')};
+      ((x.new_accounts && x.new_accounts.length) ? '\n   Tài khoản mới: ' + x.new_accounts.map(a => `${a.name} → ${a.username} / ${a.password}`).join('; ') : '') +
+      (x.warnings && x.warnings.length ? '\n' + x.warnings.join('\n') : '') : `${x.filename}: LỖI · ${x.error}`).join('\n')};
 }
 async function uploadTimesheets(input, employeeId) {
   if (!input.files.length) throw new Error('Chọn file Excel trước đã');

@@ -24,6 +24,7 @@ WEEK_TARGET_HOURS = 40.0
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # tối đa 20MB mỗi file Excel
 BACKUP_DIR = os.path.join(BASE_DIR, "data", "backups")
 BACKUP_KEEP = 7
+_LAST_CREATED: list[dict] = []  # nhân viên tự tạo trong lần upload gần nhất
 
 # Danh sách mô tả công việc cho ô "Description of proceedings"
 DESCRIPTION_OPTIONS = [
@@ -460,8 +461,8 @@ def create_entry(body: EntryIn, user=Depends(current_user), conn=Depends(get_con
             status_code=403,
             detail="Tài khoản admin không chấm công. Hãy đăng xuất và đăng nhập bằng tài khoản nhân viên.",
         )
-    if not user.get("cost_place_code"):
-        raise HTTPException(status_code=400, detail="Tài khoản chưa được gán cost place, liên hệ admin")
+    # Không chặn khi chưa gán cost place: để ô đó trống trong file, admin gán sau.
+    # (giữ nguyên luồng: admin upload file lần đầu là nhân viên chấm công được ngay)
 
     proj, panel = _check_entry_rules(
         conn, user["id"], body.work_date, body.normal_hours, body.travel_hours,
@@ -973,9 +974,11 @@ def admin_timesheet_file(employee_id: int, name: str, admin=Depends(require_admi
 
 
 def _employee_for_workbook(conn, weeks):
+    """Tìm nhân viên theo tên D1 / mã O1. Chưa có thì tự tạo (admin upload lần đầu)."""
     employees = conn.execute("SELECT * FROM employees WHERE is_admin = 0 AND active = 1").fetchall()
     inactive = conn.execute("SELECT * FROM employees WHERE is_admin = 0 AND active = 0").fetchall()
     selected = set()
+    created = []
     for week in weeks:
         name = storage.name_key(week.get("employee_name"))
         if name:
@@ -1003,11 +1006,65 @@ def _employee_for_workbook(conn, weeks):
                         detail=f"Nhân viên {off[0]['name']} (Pers.no {off[0]['pers_no']}) đang ở trạng thái nghỉ/khoá. "
                                "Hãy mở lại nhân viên này trong tab Nhân viên rồi upload lại.",
                     )
+                # chưa có trong hệ thống -> tạo mới từ thông tin trong file (lần upload đầu tiên)
+                new = _create_employee_from_week(conn, week)
+                if new:
+                    employees.append(new)
+                    selected.add(new["id"])
+                    created.append(new)
+                    continue
             raise HTTPException(status_code=400, detail=f"Sheet {week['sheet']}: không xác định được nhân viên từ tên D1 / mã O1. Hãy upload trong danh sách file của đúng nhân viên.")
         selected.add(matches[0]["id"])
     if len(selected) != 1:
         raise HTTPException(status_code=400, detail="Các sheet trong file thuộc nhiều nhân viên khác nhau")
-    return next(iter(selected))
+    emp_id = next(iter(selected))
+    _LAST_CREATED.clear()
+    _LAST_CREATED.extend(created)
+    return emp_id
+
+
+def _create_employee_from_week(conn, week):
+    """Tạo nhân viên mới từ tên ở ô D1 và mã ở ô O1 của file timesheet admin upload."""
+    name = str(week.get("employee_name") or "").strip()
+    try:
+        code = int(week.get("pers_no"))
+    except (ValueError, TypeError):
+        code = None
+    if not name:
+        return None
+    if code is None or code <= 0:
+        code = conn.execute("SELECT COALESCE(MAX(pers_no), 0) FROM employees").fetchone()[0] + 1
+    # tránh trùng pers.no hoặc username đã có
+    if conn.execute("SELECT 1 FROM employees WHERE pers_no = ?", (code,)).fetchone():
+        code = conn.execute("SELECT COALESCE(MAX(pers_no), 0) FROM employees").fetchone()[0] + 1
+    username = f"nv{code:02d}"
+    while conn.execute("SELECT 1 FROM employees WHERE username = ?", (username,)).fetchone():
+        code += 1
+        username = f"nv{code:02d}"
+    password = f"vdl@{code:02d}"
+    # lấy cost place ngay từ file admin upload (cột Cost place trong các dòng giờ)
+    cp_code = None
+    for row in week.get("rows", []):
+        value = str(row.get("cost_place") or "").strip()
+        if value:
+            cp_code = value
+            break
+    if cp_code:
+        conn.execute("INSERT OR IGNORE INTO cost_centres(code, name) VALUES (?, ?)", (cp_code, cp_code))
+    else:
+        first = conn.execute("SELECT code FROM cost_centres ORDER BY code LIMIT 1").fetchone()
+        cp_code = first["code"] if first else None
+    with conn:
+        cur = conn.execute(
+            """INSERT INTO employees(pers_no, name, emp_type, username, password_hash,
+                   cost_place_code, place, is_admin, active)
+               VALUES (?, ?, 'P', ?, ?, ?, NULL, 0, 1)""",
+            (code, name, username, auth.hash_password(password), cp_code),
+        )
+    row = conn.execute("SELECT * FROM employees WHERE id = ?", (cur.lastrowid,)).fetchone()
+    emp = dict(row)
+    emp["_new_password"] = password
+    return emp
 
 
 def replace_file(src: str, dst: str, tries: int = 6, delay: float = 0.4) -> None:
@@ -1133,7 +1190,9 @@ def admin_timesheet_upload(employee_id: int | None = None, file: UploadFile = Fi
         return {"ok": True, "employee": emp["name"], "employee_id": emp["id"],
                 "week_start": weeks[0]["start"].isoformat(), "weeks_imported": len(weeks),
                 "weeks": [{"sheet": w["sheet"], "week_start": w["start"].isoformat(), "imported": len(w["rows"])} for w in weeks],
-                "imported": sum(len(w["rows"]) for w in weeks), "file_path": master_path, "warnings": warnings}
+                "imported": sum(len(w["rows"]) for w in weeks), "file_path": master_path, "warnings": warnings,
+                "new_accounts": [{"name": c["name"], "username": c["username"],
+                                  "password": c["_new_password"]} for c in _LAST_CREATED]}
     finally:
         if os.path.isfile(tmp_path):
             os.remove(tmp_path)

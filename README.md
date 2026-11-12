@@ -41,16 +41,23 @@ Mở http://127.0.0.1:8000
 
 Dừng web: Ctrl+C.
 
-## File Excel mẫu (quan trọng)
+## Cách đưa nhân viên vào hệ thống (quan trọng)
 
-Repo **không kèm** file Excel mẫu của công ty (dữ liệu nội bộ). Muốn có đủ danh sách
-nhân viên, project, panel và cost place:
+Repo **không kèm** file Excel mẫu của công ty. Luồng đúng như sau:
 
-1. Copy file `FORM TIMESHEET 2026 VDL VN.xlsx` vào thư mục `data/source/`
-2. Chạy lại: `python -m app.seed`
+1. Admin đăng nhập (`admin` / `admin@2026`)
+2. Vào tab **Nhân viên** → nút **…** hoặc ô upload → chọn file timesheet `.xlsx` của nhân viên đó
+3. Hệ thống đọc tên ở ô D1, mã Pers.no ở ô O1, tự tạo nhân viên và hiện tài khoản mới,
+   ví dụ `Lê Văn Khải → nv10 / vdl@10`. Cost place lấy luôn từ file.
+4. Đưa tài khoản đó cho nhân viên. Từ lần này, họ tự chấm công và dữ liệu
+   được ghi thẳng vào chính file Excel đã upload trên máy admin.
 
-Không có file mẫu thì web vẫn chạy được với tài khoản admin, nhưng danh sách nhân viên
-đang trống — vào tab **Nhân viên** để thêm tay.
+Chỉ mất bước upload này một lần cho mỗi người. Nhân viên chưa được upload file thì
+chưa đăng nhập được.
+
+Muốn nạp sẵn toàn bộ danh sách nhân viên / 346 project / 3315 panel từ file mẫu của
+công ty thì copy `FORM TIMESHEET 2026 VDL VN.xlsx` vào `data/source/` rồi chạy
+`python -m app.seed`.
 
 ## Dữ liệu nằm ở đâu
 
